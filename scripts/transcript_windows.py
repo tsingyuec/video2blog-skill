@@ -135,7 +135,7 @@ def _rewrite_row(line: str, new_text: str) -> str:
     tail_match = JUMP_LINK_TAIL_PATTERN.search(line)
     link = tail_match.group(0) if tail_match else ""
     img_match = IMG_CELL_PATTERN.search(line)
-    img_cell = img_match.group(0)[1:] if img_match else ""  # 去掉行首 "|"
+    img_cell = img_match.group(0) if img_match else ""  # 保留作为列分隔的 "|"
     return f"| {new_text}{link} {img_cell}".rstrip()
 
 
