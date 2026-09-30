@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """分栏文稿窗口文本的「导出 ↔ 写回」工具 —— 文稿通顺化循环的两端。
 
-与 transcripts/pNN.md（Markdown 表格分栏版）配合使用：
+与 transcripts/p01.md（Markdown 表格分栏版）配合使用：
 
     # 1) 导出某时间区间的窗口文本，每行形如 01202|窗口原文
     python transcript_windows.py dump transcripts/p08.md 1202 1700
@@ -12,7 +12,7 @@
     REWRITE
 
 文稿行格式约定（由 build_transcript.py 生成）：
-    | 字幕文本 [【跳转到 MM:SS】](url) | <img src="img/pNN/SSSSS.jpg" width="9000"> |
+    | 字幕文本 [【跳转到 MM:SS】](url) | <img src="img/p01/SSSSS.jpg" width="9000"> |
 
 其中 SSSSS = 窗口起点秒 + 1，既是图片文件名也是窗口号（5 位）。
 """

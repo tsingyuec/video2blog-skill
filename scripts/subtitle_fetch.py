@@ -11,7 +11,6 @@
 
 输出：``<out>/kedou_<视频ID>.json``，其中 ``data.subtitleItemVoList[0].content``
 即 SRT 文本（部分平台 content 为空、只有 srcUrl，脚本会自动下载回填）。
-注意：连续请求约 10 次后会限流（code:500），默认每次请求间隔 --delay 秒。
 
 设计约定：本流水线只处理**单个视频**；多个视频对每个视频重复调用即可。
 
@@ -298,8 +297,6 @@ def parse_args() -> argparse.Namespace:
                         help="视频 ID：B 站为 BV 号，YouTube 为 11 位视频 ID")
     parser.add_argument("--platform", default="bilibili", choices=sorted(PLATFORM_URLS),
                         help="视频平台，默认 bilibili")
-    parser.add_argument("--delay", type=float, default=6,
-                        help="（保留参数，兼容旧脚本）请求间隔秒数，默认 6")
     return parser.parse_args()
 
 

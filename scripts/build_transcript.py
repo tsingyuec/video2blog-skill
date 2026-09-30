@@ -1,22 +1,22 @@
 #!/usr/bin/env python3
 """生成「图片-字幕」原始文稿 —— 本工作流的核心工件。
 
-处理**单个视频**（统一映射为分 P ``p01``；多个视频对每个视频重复调用本脚本）：
-  1) 若 ``subs/kedou_NN.json``（subtitle_fetch.py 的输出）存在，先导出
-     ``subs/pNN.srt`` 与 ``subs/pNN.txt``；
-  2) 对 ``frames/pNN/`` 的 1fps 抽帧按「画面变化」切分时间窗口
+处理**单个视频**（统一映射为 ``p01``；多个视频对每个视频重复调用本脚本）：
+  1) 若 ``subs/kedou_<视频ID>.json``（subtitle_fetch.py 的输出）存在，先导出
+     ``subs/p01.srt`` 与 ``subs/p01.txt``；
+  2) 对 ``frames/p01/`` 的 1fps 抽帧按「画面变化」切分时间窗口
      （帧缩到 32x18 灰度，与窗口代表帧做平均绝对差）；
-  3) 每个窗口保留一张代表帧并合并窗口内字幕，输出 ``transcripts/pNN.md``
+  3) 每个窗口保留一张代表帧并合并窗口内字幕，输出 ``transcripts/p01.md``
      （Markdown 表格分栏，含可点击时间戳）。
 
-⚠️ 通顺化改写（dump_windows/apply_windows 循环）之后不要再运行本脚本，
+⚠️ 通顺化改写（transcript_windows.py 的 dump/apply 循环）之后不要再运行本脚本，
    否则会覆盖已改写的文稿。
 
 用法:
     python build_transcript.py --workdir <dir> --bv BV1xxxx --title "视频标题" \\
-        --parts 1,2,3 --diff 12 --minwin 5 --maxwin 25
-    python build_transcript.py --platform youtube --bv dQw4w9WgXcQ --title "标题" \
-        --parts 1 --workdir <dir>
+        --diff 12 --minwin 5 --maxwin 25
+    python build_transcript.py --platform youtube --bv dQw4w9WgXcQ --title "标题" \\
+        --workdir <dir>
 """
 from __future__ import annotations
 

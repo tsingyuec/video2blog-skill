@@ -5,7 +5,7 @@
 ## 0. 第一原则：基于文稿，不凭空发挥
 
 - 内容必须来自原始文稿（字幕 + 幻灯片）；不得编造视频之外的事实。
-- 字幕是 B 站 AI 生成，错误较多，要结合上下文纠正，例如：
+- 字幕由平台 AI 生成（B 站 AI 字幕 / YouTube 自动字幕），错误较多，要结合上下文纠正，例如：
   - `cs three three nox` → **CS336**
   - `PERCY` → **Percy Liang**；`TO/TAC` → **Tatsu**；`兔20年` → **20 年**
   - `tension`（双关语处）→ **attention（注意力）**；`mob two` → **Mamba-2**
@@ -16,7 +16,7 @@
 
 - 可以润色、合并断句、纠正错拼，但**不得丢信息**；无字幕窗口（`> （此区间无字幕）`）保持原样。
 - 只改 `> ` 行文本，不动标题、图片名、窗口顺序。
-- 用 `scripts/dump_windows.py`（导出 `NNNNN|文本`）+ `scripts/apply_windows.py`（heredoc 写回，**必须写结束分隔符**）做"导出→改写→写回"循环，每批 30–60 个窗口。
+- 用 `scripts/transcript_windows.py dump`（导出 `NNNNN|文本`）+ `scripts/transcript_windows.py apply`（heredoc 写回，**必须写结束分隔符**）做"导出→改写→写回"循环，每批 30–60 个窗口。
 - 改写完成后**不要重跑** `build_transcript.py`（会覆盖已修复文本）。
 
 ## 1. 金字塔写作风格（把思想组织成“金字塔”）

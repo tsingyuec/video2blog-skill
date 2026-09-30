@@ -57,11 +57,21 @@ body **不是明文 JSON**，而是加密后的字符串；直接 POST 明文会
 
 `content` 就是标准 SRT（时间戳形如 `0:0:0,1 --> 0:0:4,98`）。
 
+### YouTube 的特殊行为：srcUrl 回填
+
+对 YouTube 视频，`content` 可能为 `null`，同时多一个 `srcUrl` 字段——指向
+YouTube 官方 timedtext 字幕（内容即标准 SRT）。`subtitle_fetch.py` 的
+`resolve_subtitle_content` 会自动下载 srcUrl 并回填到 `content`，下游无需感知。
+
+另外注意：部分 YouTube 视频 kedou 会返回 `status: "解析失败"`（它后端解析不了，
+如 jn7XU4OaIaE），且这些视频往往连 YouTube 自身的自动字幕都没有——属于无解个案，
+换个视频即可。
+
 ## 限流
 
 - 连续请求约 **10 次**后会返回 `code: 500, message: 请求过于频繁，请稍后再试`（连同 `code:530` 之外的普通错误）。
 - 处理：**分批请求 + 每次间隔数秒**；被限流后**等待约 1–2 分钟**再继续，通常即可恢复。
-- 脚本 `subtitle_fetch.py` 已内置间隔（默认 6 秒，`--delay` 可调）与逐条容错。
+- 脚本 `subtitle_fetch.py` 逐条容错：单个视频失败不影响后续（多视频场景重复调用即可）。
 
 ## 排查清单
 
@@ -69,7 +79,8 @@ body **不是明文 JSON**，而是加密后的字符串；直接 POST 明文会
 | --- | --- | --- |
 | `code:530 数据处理异常` | body 未加密 / 加密方式改变 | 核对本文件第 2–4 步；确认使用同一套 RSA+AES |
 | `code:500 请求过于频繁` | 触发限流 | 等待 1–2 分钟后分批重试 |
-| `code:200` 但 `subtitleItemVoList` 为空 | 该分 P 没有 AI 字幕 | 跳过或改用其他转写方式（本地 Whisper 等） |
+| `code:200` 但 `subtitleItemVoList` 为空 | 该视频没有 AI 字幕（或解析失败） | 跳过，或改用 yt-dlp 直接拉字幕 / 本地 Whisper 转写 |
+| `code:200`、`content` 为 `null` | YouTube 模式：字幕在 `srcUrl` | 正常现象，脚本已自动下载回填 |
 | `auth/keys` 报错 | 站点改版 | 重新从前端 JS 提取加密逻辑（搜索 `useReqPublicKey` / `encryptLong`） |
 
 ## 免责声明
