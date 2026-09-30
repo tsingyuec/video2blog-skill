@@ -1,4 +1,4 @@
-# bilibili-blog
+# video2blog
 
 把 B 站视频（长课程 / 讲座）整理成图文技术博客的**端到端工作流**（作为 Claude/通用 Agent 的 Skill 使用）。
 
