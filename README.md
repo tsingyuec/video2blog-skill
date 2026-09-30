@@ -14,7 +14,7 @@
 
 - 🎞️ **智能抽帧去重**：1fps 抽帧后按画面变化切分时间窗口（32×18 灰度差分）去重以避免重复画面
 - 📝 **可核查的原始文稿**：Markdown 分栏表格，左边幕文本、右边代表帧，每行带时间戳跳转链接
-- 🌐 **多平台**：Bilibili（多 P 课程）与 YouTube（单视频）共用同一套流水线
+- 🌐 **多平台**：Bilibili 与 YouTube 共用同一套单视频流水线；多个视频重复执行即可
 - 🔐 **零依赖字幕抓取**：Kedou 在线字幕服务的 RSA+AES 加密协议纯标准库实现（无需 pycryptodome）
 - ✍️ **内建写作规范**：金字塔写作风格 + SCQA 开篇 + "初学者可读"的术语解释（详见 `reference/blog-writing.md`）
 - 🔁 **通顺化工作流**：字幕逐句拼接往往不通顺，提供「按窗口导出 → 改写 → 写回」循环工具
@@ -41,14 +41,14 @@ npx skills add try-agaaain/video2blog-skill
 python scripts/download_video.py --workdir <workdir> --platform youtube --bv SYuSZIIYOfI --height 720
 
 # 2. 1fps 抽帧
-python scripts/extract_frames.py --workdir <workdir> --parts 1
+python scripts/extract_frames.py --workdir <workdir>
 
 # 3. 抓取 AI 字幕
 python scripts/subtitle_fetch.py --platform youtube --bv SYuSZIIYOfI --out <workdir>/subs
 
 # 4. 生成「图-字幕」原始文稿（--diff/--minwin/--maxwin 控制去重粒度）
 python scripts/build_transcript.py --workdir <workdir> --platform youtube \
-  --bv SYuSZIIYOfI --title "<视频标题>" --parts 1
+  --bv SYuSZIIYOfI --title "<视频标题>"
 
 # 5. （可选）逐窗口通顺化：导出 → 人工/AI 改写 → 写回
 python scripts/transcript_windows.py dump <workdir>/transcripts/p01.md 0 600
@@ -59,20 +59,20 @@ REWRITE
 # 6. 基于原始文稿写博客（Agent Skill 模式下由 Agent 按 SKILL.md 第 5 步完成）
 ```
 
-完整参数说明、B 站多 P 下载、去重参数调优、常见故障排查见 [`SKILL.md`](SKILL.md)。
+完整参数说明、去重参数调优、常见故障排查见 [`SKILL.md`](SKILL.md)。
 
-## 工作目录约定
+## 产物目录约定
 
 ```
 <workdir>/
-├─ videos/        pNN.mp4                 # 下载的视频（仅视频流）
-├─ frames/pNN/    00001.jpg, 00002.jpg…   # 1fps 抽帧（帧号 = 秒数+1）
-├─ subs/          pNN.srt（+ kedou_NN.json）
-├─ transcripts/pNN.md                     # ★ 原始文稿（图-字幕对照）
-├─ transcripts/img/pNN/xxxxx.jpg          # 稿中保留的代表帧
+├─ videos/        p01.mp4                 # 下载的视频（仅视频流）
+├─ frames/p01/    00001.jpg, 00002.jpg…   # 1fps 抽帧（帧号 = 秒数+1）
+├─ subs/          p01.srt（+ kedou_<视频ID>.json）
+├─ transcripts/p01.md                     # ★ 原始文稿（图-字幕对照）
+├─ transcripts/img/p01/xxxxx.jpg          # 稿中保留的代表帧
 └─ blog/
-   ├─ blNN.md                             # ★ 每个分 P 一篇博客
-   └─ assets/pNN/                         # 博客配图
+   ├─ blog.md                             # ★ 本视频的博客
+   └─ assets/                             # 博客配图
 ```
 
 ## 项目结构
@@ -81,22 +81,15 @@ REWRITE
 SKILL.md                      # 技能主文件：完整工作流（任务速查表 + 5 步流程）
 requirements.txt              # Python 依赖清单
 reference/
-├─ blog-writing.md            # 金字塔写作风格 + 初学者可读写作规范（写博客前必读）
-└─ kedou-api.md               # Kedou 字幕接口：加密原理与排查（字幕报错时读）
+    ├─ blog-writing.md            # 金字塔写作风格 + 初学者可读写作规范（写博客前必读）
+    └─ kedou-api.md               # Kedou 字幕接口：加密原理与排查（字幕报错时读）
 scripts/
-├─ download_video.py          # yt-dlp 封装：仅视频流下载，支持续传
-├─ extract_frames.py          # OpenCV 1fps 抽帧
-├─ subtitle_fetch.py          # Kedou 字幕抓取（纯标准库，AES/RSA 内置实现）
-├─ build_transcript.py        # 分栏文稿生成（窗口去重 + 字幕合并 + 时间戳）
-└─ transcript_windows.py      # 文稿通顺化：窗口导出（dump）/ 写回（apply）
+    ├─ download_video.py          # yt-dlp 封装：仅视频流下载，支持续传
+    ├─ extract_frames.py          # OpenCV 1fps 抽帧
+    ├─ subtitle_fetch.py          # Kedou 字幕抓取（纯标准库，AES/RSA 内置实现）
+    ├─ build_transcript.py        # 分栏文稿生成（窗口去重 + 字幕合并 + 时间戳）
+    └─ transcript_windows.py      # 文稿通顺化：窗口导出（dump）/ 写回（apply）
 ```
-
-## 注意事项
-
-- **字幕由平台 AI 生成**，可能出现识别错误（术语/人名错拼）。写博客时必须纠正，且不得编造字幕之外的事实。
-- **1fps 不等于每帧都要用**：文稿/博客只保留代表帧，否则又大又冗余。
-- **Kedou 限流**：连续请求约 10 次后会返回 `code:500`，脚本已内置间隔（`--delay`），大批量分批下载。
-- **版权**：仅供个人学习与笔记整理，请遵守各平台的用户协议。
 
 ## 致谢
 

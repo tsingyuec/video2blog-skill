@@ -1,17 +1,19 @@
 ---
 name: video2blog
-description: "把视频（B 站长课程/讲座、YouTube 视频）整理成图文技术博客的端到端流程：下载视频、每秒抽帧并按画面变化去重、抓取平台 AI 字幕（ Kedou 接口）、生成『图片-字幕』原始文稿（带可点击时间戳）、再按金字塔写作风格写成初学者也能看懂的博客。只要用户提到把 B 站/YouTube 视频、BV 号、视频链接整理成博客、笔记、图文稿、逐字稿、学习笔记、视频转文字、视频配图总结——即使没有明确说『博客』——也要使用本技能。"
+description: "把视频（Bilibili / YouTube 视频）整理成图文技术博客的完整流程：下载视频、每秒抽帧并按画面变化去重、抓取平台 AI 字幕（ Kedou 接口）、生成『图片-字幕』原始文稿、再按金字塔写作风格写成初学者也能看懂的博客。只要用户提到把 B 站/YouTube 视频、BV 号、视频链接整理成博客、笔记、图文稿、逐字稿、学习笔记、视频转文字、视频配图总结——即使没有明确说『博客』——可使用本技能。"
 ---
 
 # B 站/YouTube 视频 → 图文博客 工作流
 
-**适用**：B 站视频/多 P 课程/长讲座，以及 YouTube 视频。目标产物是**每个分 P 一篇中文技术博客**（配图来自视频原片），以及一份可核查的**原始文稿**。
+**适用**：B 站视频（课程 / 长讲座）与 YouTube 视频。目标产物是**一篇中文技术博客**（配图来自视频原片）以及一份可核查的**原始文稿**。
+
+> **单视频模型**：流水线只处理一个视频，多个视频 = 对每个视频重复一遍相同流程（各自一个 workdir）。B 站多 P 视频请对每个分 P 链接（`?p=N`）单独走一遍。
 
 ## 任务速查表
 
 | 任务 | 做法 |
 | --- | --- |
-| 从零整理一个 BV 号 | 按第 1→5 步顺序完整走完 |
+| 从零整理一个视频 | 按第 1→5 步顺序完整走完 |
 | 已下好视频/已有抽帧 | 跳到第 3 步取字幕 |
 | 已有原始文稿，只要写博客 | 直接第 4 步通顺化（若未做）+ 第 5 步 |
 | 字幕接口报错/限流 | 读 `reference/kedou-api.md` |
@@ -45,45 +47,39 @@ pip install -r requirements.txt   # opencv-python、numpy、pillow、yt-dlp
 
 ```
 <workdir>/
-├─ videos/        pNN.mp4                 # 下载的视频（仅视频流）
-├─ frames/pNN/    00001.jpg, 00002.jpg…   # 1fps 抽帧（帧号 = 秒数+1）
-├─ subs/          pNN.srt（+ kedou_NN.json）
-├─ transcripts/pNN.md                     # ★ 原始文稿（图-字幕对照）
-├─ transcripts/img/pNN/xxxxx.jpg          # 稿中保留的代表帧
+├─ videos/        p01.mp4                 # 下载的视频（仅视频流）
+├─ frames/p01/    00001.jpg, 00002.jpg…   # 1fps 抽帧（帧号 = 秒数+1）
+├─ subs/          p01.srt（+ kedou_<视频ID>.json）
+├─ transcripts/p01.md                     # ★ 原始文稿（图-字幕对照）
+├─ transcripts/img/p01/xxxxx.jpg          # 稿中保留的代表帧
 └─ blog/
-   ├─ blNN.md                             # ★ 每个分 P 一篇博客
-   └─ assets/pNN/                         # 博客配图
+   ├─ blog.md                             # ★ 本视频的博客
+   └─ assets/                             # 博客配图
 ```
 
 ---
 
 ## 第 1 步：获取信息并下载（仅视频流）
 
-统一用 `scripts/download_video.py`（yt-dlp 封装）：只下视频流不要音频（字幕来自在线服务，无需 ffmpeg 合并）、优先 avc1/H.264（OpenCV 解码最稳）、支持断点续传。
+统一用 `scripts/download_video.py`（yt-dlp 封装）：下载视频流省略音频、优先 avc1/H.264（OpenCV 解码最稳）、支持断点续传。
 
 ```bash
-# B 站（多 P，--parts 圈定范围）
-python scripts/download_video.py --workdir "<workdir>" --bv <BV> --parts 1,2,3
+# B 站
+python scripts/download_video.py --workdir "<workdir>" --bv <BV>
 
 # YouTube（单视频；分辨率过高/体积过大时用 --height 720）
 python scripts/download_video.py --workdir "<workdir>" --platform youtube --bv <视频ID> --height 720
-
-# 查看分 P 信息（标题 / 时长），决定 --parts 范围
-python -m yt_dlp --no-warnings --skip-download \
-  --print "%(playlist_index)s|%(duration)s|%(title)s" "https://www.bilibili.com/video/<BV>/"
 ```
 
 要点：
-- 字幕来自在线服务，**不需要音频**，所以只下视频流即可，避免音视频合并且不需要 ffmpeg。
+- 字幕来自在线服务，**不需要音频**，所以只下视频流即可。
 - 优先 `avc1`(H.264) 是为了让 OpenCV 解码更稳；若某些视频只有 AV1/HEVC，OpenCV 一般也能解。
-- **单 P 下载时 `%(playlist_index)s` 会变成 `NA`**，所以要么整季一起下（`-I`），要么改用固定文件名（download_video.py 已处理）。
 - **续传**：yt-dlp 默认从 `.part` 断点续传，但**换了格式（如改 --height）旧 .part 会失效**（HTTP 416），需先删 `videos/*.part`。
-- 多 P 视频可能含「中配版 / 原版」等重复分 P，先看标题确认唯一讲次再决定下载范围。
 
 ## 第 2 步：按 1fps 抽帧（OpenCV）
 
 ```bash
-python scripts/extract_frames.py --workdir "<workdir>" --parts 1,2,3
+python scripts/extract_frames.py --workdir "<workdir>"
 ```
 
 - 帧号 = 秒数 + 1（`00001.jpg` 对应第 0 秒），与第 4 步的时间对齐。
@@ -95,15 +91,14 @@ python scripts/extract_frames.py --workdir "<workdir>" --parts 1,2,3
 平台 AI 字幕采用在线字幕服务 **kedou.life** 的接口（支持 B 站与 YouTube）；它对 body 做了 RSA+AES 加密，`scripts/subtitle_fetch.py` 已实现（纯 Python 标准库，零依赖），直接跑：
 
 ```bash
-# B 站（多 P）
-python scripts/subtitle_fetch.py --out "<workdir>/subs" --bv <BV> --parts 1,2,3
+# B 站
+python scripts/subtitle_fetch.py --out "<workdir>/subs" --bv <BV>
 
-# YouTube（单视频，忽略 --parts）
-python scripts/subtitle_fetch.py --platform youtube \
-  --bv <视频ID> --out "<workdir>/subs"
+# YouTube
+python scripts/subtitle_fetch.py --platform youtube --bv <视频ID> --out "<workdir>/subs"
 ```
 
-- B 站每个分 P 输出 `subs/kedou_NN.json`；YouTube 输出 `subs/kedou_<视频ID>.json`。其中 `data.subtitleItemVoList[0].content` 即 SRT 文本。
+- 输出 `subs/kedou_<视频ID>.json`，其中 `data.subtitleItemVoList[0].content` 即 SRT 文本。
 - **限流**：连续请求约 10 次后返回 `code:500 请求过于频繁`。脚本默认每次间隔数秒并逐条容错；**大批量时分批、被限流后等 1–2 分钟再续**。
 - 若站点改版/失效（报加密错误、空字幕等），读 `reference/kedou-api.md` 了解加密原理与排查。
 
@@ -112,16 +107,16 @@ python scripts/subtitle_fetch.py --platform youtube \
 本流程的核心工件。虽然抽了 1fps，但**绝大多数相邻帧几乎一样**（同一张幻灯片停留几十秒）。做法：按**画面变化**切分时间窗口，每个窗口只保留一张代表帧，并把窗口内字幕合并。
 
 ```bash
-# B 站（多 P）
+# B 站
 python scripts/build_transcript.py --workdir "<workdir>" --bv <BV> \
-  --title "<视频标题>" --parts 1,2,3 --diff 12 --minwin 5 --maxwin 25
+  --title "<视频标题>" --diff 12 --minwin 5 --maxwin 25
 
-# YouTube（--bv 传 11 位视频 ID，跳转链接自动生成为 youtu.be 格式的 t=秒）
+# YouTube（跳转链接自动生成为 &t=秒 格式）
 python scripts/build_transcript.py --workdir "<workdir>" --platform youtube \
-  --bv <视频ID> --title "<视频标题>" --parts 1
+  --bv <视频ID> --title "<视频标题>"
 ```
 
-- 脚本会先把字幕 json（B 站 `kedou_NN.json` / YouTube `kedou_<视频ID>.json`）导出为 `subs/pNN.srt`，再生成 `transcripts/pNN.md`。时间戳跳转链接按平台自动生成：B 站 `?p=N&t=秒`，YouTube `&t=秒`。
+- 脚本会先把字幕 json（`subs/kedou_<视频ID>.json`）导出为 `subs/p01.srt`，再生成 `transcripts/p01.md`。时间戳跳转链接按平台自动生成：B 站 `?t=秒`，YouTube `&t=秒`。
 - **判据**：帧缩到 32×18 灰度做平均绝对差；与当前窗口代表帧差异 `> --diff` 且距窗口起点 `≥ --minwin` 秒 → 开新窗口；同画面最长停留 `--maxwin` 秒强制切一刀。
 - **参数经验**：`--diff 12 --minwin 5 --maxwin 25` 对课堂幻灯片约 95% 去重率。画面切换剧烈就调大 `--diff`，想更细就调小。
 - 输出为 MD 表格分栏格式（左字右图），每行一个窗口，形如：
@@ -154,7 +149,7 @@ REWRITE
 
 ## 第 5 步：写博客（金字塔写作风格 + 初学者可读）
 
-对每个分 P，**基于第 4 步的原始文稿**写 `blog/blNN.md`。完整写作规范见 `reference/blog-writing.md`，要点：
+**基于第 4 步的原始文稿**写 `blog/blog.md`。完整写作规范见 `reference/blog-writing.md`，要点：
 
 要点：金字塔写作风格（结论先行、SCQA 开篇、MECE 分组、3–5 个要点一组、标题写判断句）与章节式结构、配图/时间戳、完整覆盖等全部细则，见 `reference/blog-writing.md`（写博客前必读）。
 

@@ -10,7 +10,7 @@
 依赖：``pip install opencv-python numpy``
 
 用法:
-    python extract_frames.py --workdir <dir> --parts 1,2,3 [--fps 1] [--width 960] [--quality 85]
+    python extract_frames.py --workdir <dir> [--fps 1] [--width 960] [--quality 85]
 """
 from __future__ import annotations
 
@@ -87,11 +87,10 @@ def _resize_if_needed(frame, target_width: int):
     return cv2.resize(frame, (target_width, height), interpolation=cv2.INTER_AREA)
 
 
-def extract_part(part: int, options: ExtractOptions) -> None:
-    """抽取第 ``part`` 个分 P：视频缺失或缺帧图不足时提示，否则完成抽帧。"""
-    part_name = f"p{part:02d}"
-    video_path = os.path.join(options.workdir, "videos", part_name + ".mp4")
-    out_dir = os.path.join(options.workdir, "frames", part_name)
+def extract_part(options: ExtractOptions) -> None:
+    """抽帧 videos/p01.mp4 -> frames/p01/；视频缺失或缺帧图不足时提示。"""
+    video_path = os.path.join(options.workdir, "videos", "p01.mp4")
+    out_dir = os.path.join(options.workdir, "frames", "p01")
 
     if not os.path.exists(video_path):
         print(f"{part_name}: 缺少视频 {video_path}")
@@ -109,8 +108,7 @@ def extract_part(part: int, options: ExtractOptions) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="按固定间隔（默认 1fps）对视频抽帧")
-    parser.add_argument("--workdir", required=True, help="工作目录")
-    parser.add_argument("--parts", required=True, help="分 P 列表，如 1,2,3")
+    parser.add_argument("--workdir", required=True, help="工作目录（视频为 videos/p01.mp4）")
     parser.add_argument("--fps", type=float, default=1, help="抽帧频率（帧/秒），默认 1")
     parser.add_argument("--width", type=int, default=960, help="缩放宽度，0 表示原始尺寸")
     parser.add_argument("--quality", type=int, default=85, help="JPEG 质量 0-100，越大越清晰")
@@ -129,8 +127,7 @@ def main() -> None:
         quality=args.quality,
         force=args.force,
     )
-    for part in (int(x) for x in args.parts.split(",")):
-        extract_part(part, options)
+    extract_part(options)
 
 
 if __name__ == "__main__":

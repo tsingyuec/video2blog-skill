@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """生成「图片-字幕」原始文稿 —— 本工作流的核心工件。
 
-对每个分 P 做三件事：
+处理**单个视频**（统一映射为分 P ``p01``；多个视频对每个视频重复调用本脚本）：
   1) 若 ``subs/kedou_NN.json``（subtitle_fetch.py 的输出）存在，先导出
      ``subs/pNN.srt`` 与 ``subs/pNN.txt``；
   2) 对 ``frames/pNN/`` 的 1fps 抽帧按「画面变化」切分时间窗口
@@ -38,10 +38,8 @@ MIN_KEPT_WINDOW_SEC = 3
 
 # 时间戳跳转链接构造规则：{t} 为窗口起点秒（YouTube 的 t=秒数 同样有效）
 JUMP_URL_BUILDERS = {
-    "bilibili": lambda video_id, part, t: (
-        f"https://www.bilibili.com/video/{video_id}/?p={part}&t={t}"),
-    "youtube": lambda video_id, part, t: (
-        f"https://www.youtube.com/watch?v={video_id}&t={t}"),
+    "bilibili": lambda video_id, t: f"https://www.bilibili.com/video/{video_id}/?t={t}",
+    "youtube": lambda video_id, t: f"https://www.youtube.com/watch?v={video_id}&t={t}",
 }
 
 
@@ -63,25 +61,18 @@ class Window:
 
 
 # ---------------------------------------------------------------- 字幕导出与解析
-def export_srt_from_kedou_json(workdir: str, part: int, platform: str = "bilibili",
-                               video_id: str = "") -> None:
-    """把 kedou_NN.json（B 站）或 kedou_<视频ID>.json（YouTube）导出为
-    subs/pNN.srt 与 subs/pNN.txt。
+def export_srt_from_kedou_json(workdir: str, video_id: str) -> None:
+    """把 subs/kedou_<视频ID>.json（subtitle_fetch.py 的输出）导出为
+    subs/p01.srt 与 subs/p01.txt。
 
     已存在 srt 时跳过（幂等）；json 缺失或内容为空时静默返回，由后续
     流程报告「缺少字幕」。
     """
-    part_name = f"p{part:02d}"
-    srt_path = os.path.join(workdir, "subs", part_name + ".srt")
+    srt_path = os.path.join(workdir, "subs", "p01.srt")
     if os.path.exists(srt_path):
         return
 
-    json_candidates = [
-        os.path.join(workdir, "subs", f"kedou_{part:02d}.json"),
-        os.path.join(workdir, "subs", f"kedou_{part}.json"),
-    ]
-    if platform != "bilibili" and video_id:
-        json_candidates.insert(0, os.path.join(workdir, "subs", f"kedou_{video_id}.json"))
+    json_candidates = [os.path.join(workdir, "subs", f"kedou_{video_id}.json")]
     for json_path in json_candidates:
         if not os.path.exists(json_path):
             continue
@@ -98,14 +89,14 @@ def export_srt_from_kedou_json(workdir: str, part: int, platform: str = "bilibil
         os.makedirs(os.path.join(workdir, "subs"), exist_ok=True)
         with open(srt_path, "w", encoding="utf-8") as f:
             f.write(srt_content)
-        # pNN.txt：去掉序号行与时间轴行，只留字幕文本，便于通顺化时参考
+        # p01.txt：去掉序号行与时间轴行，只留字幕文本，便于通顺化时参考
         text_lines = []
         for line in srt_content.splitlines():
             stripped = line.strip()
             if not stripped or re.fullmatch(r"\d+", stripped) or "-->" in stripped:
                 continue
             text_lines.append(stripped)
-        txt_path = os.path.join(workdir, "subs", part_name + ".txt")
+        txt_path = os.path.join(workdir, "subs", "p01.txt")
         with open(txt_path, "w", encoding="utf-8") as f:
             f.write("\n".join(text_lines))
         return
@@ -174,16 +165,19 @@ def split_into_windows(frame_files: list[str], options: WindowingOptions) -> lis
 
 
 # ---------------------------------------------------------------- 文稿生成
-def build_transcript(workdir: str, bv: str, title: str, part: int,
+def build_transcript(workdir: str, video_id: str, title: str,
                      options: WindowingOptions, platform: str = "bilibili") -> None:
-    """为第 ``part`` 个分 P 生成 transcripts/pNN.md；缺帧或缺字幕时跳过。"""
-    part_name = f"p{part:02d}"
-    export_srt_from_kedou_json(workdir, part, platform, bv)
+    """生成 transcripts/p01.md；缺帧或缺字幕时跳过。
 
-    frame_files = sorted(glob.glob(os.path.join(workdir, "frames", part_name, "*.jpg")))
-    srt_path = os.path.join(workdir, "subs", part_name + ".srt")
+    video_id 仅用于时间戳跳转链接；workdir 内统一使用 p01 命名。
+    """
+    part_name = "p01"
+    export_srt_from_kedou_json(workdir, video_id)
+
+    frame_files = sorted(glob.glob(os.path.join(workdir, "frames", "p01", "*.jpg")))
+    srt_path = os.path.join(workdir, "subs", "p01.srt")
     if not frame_files or not os.path.exists(srt_path):
-        print(f"{part_name}: 缺少帧或字幕，跳过")
+        print("p01: 缺少帧或字幕，跳过")
         return
     subtitles = parse_srt(srt_path)
 
@@ -194,7 +188,7 @@ def build_transcript(workdir: str, bv: str, title: str, part: int,
     image_dir = os.path.join(workdir, "transcripts", "img", part_name)
     os.makedirs(image_dir, exist_ok=True)
     lines = [
-        f"# {title} · 第{part}讲 原始文稿（图-字幕分栏）",
+        f"# {title} 原始文稿（图-字幕分栏）",
         "",
         "| 字幕文本 | 画面 |",
         "| :--- | ---: |",
@@ -211,7 +205,7 @@ def build_transcript(workdir: str, bv: str, title: str, part: int,
             continue  # 无字幕且太短的窗口（转场/空屏）直接丢弃
 
         timestamp_label = f"{window.start_sec // 60:02d}:{window.start_sec % 60:02d}"
-        jump_url = JUMP_URL_BUILDERS[platform](bv, part, window.start_sec)
+        jump_url = JUMP_URL_BUILDERS[platform](video_id, window.start_sec)
         image_name = f"{window.start_sec:05d}.jpg"
         shutil.copyfile(window.frame_path, os.path.join(image_dir, image_name))
         kept_count += 1
@@ -222,10 +216,10 @@ def build_transcript(workdir: str, bv: str, title: str, part: int,
             f"| <img src=\"img/{part_name}/{image_name}\" width=\"9000\"> |"
         )
 
-    output_path = os.path.join(workdir, "transcripts", part_name + ".md")
+    output_path = os.path.join(workdir, "transcripts", "p01.md")
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
-    print(f"{part_name}: frames={len(frame_files)} windows={len(windows)} "
+    print(f"p01: frames={len(frame_files)} windows={len(windows)} "
           f"kept={kept_count} -> {output_path}")
 
 
@@ -238,7 +232,6 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--platform", default="bilibili", choices=sorted(JUMP_URL_BUILDERS),
                         help="视频平台（决定跳转链接格式与字幕文件名），默认 bilibili")
     parser.add_argument("--title", required=True, help="视频标题（写入文稿一级标题）")
-    parser.add_argument("--parts", required=True, help="分 P 列表，如 1,2,3")
     parser.add_argument("--diff", type=float, default=12.0,
                         help="画面差异阈值（平均绝对差），默认 12")
     parser.add_argument("--minwin", type=int, default=5,
@@ -255,8 +248,8 @@ def main() -> None:
         min_window_sec=args.minwin,
         max_window_sec=args.maxwin,
     )
-    for part in (int(x) for x in args.parts.split(",")):
-        build_transcript(args.workdir, args.bv, args.title, part, options, args.platform)
+
+    build_transcript(args.workdir, args.bv, args.title, options, args.platform)
 
 
 if __name__ == "__main__":

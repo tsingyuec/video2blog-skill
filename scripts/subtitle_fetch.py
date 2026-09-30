@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""通过 kedou.life 在线字幕服务抓取视频平台的 AI 字幕（支持 B 站 / YouTube）。纯 Python 标准库实现（零 pip 依赖）。
+"""通过 kedou.life 在线字幕服务抓取视频平台的 AI 字幕（支持 Bilibili / YouTube）。
+纯 Python 标准库实现（零 pip 依赖）。
 
 接口 body 需要 RSA+AES 加密（逆向自其前端，详见 reference/kedou-api.md）：
   1) GET  /api/auth/keys              -> { k1: RSA 公钥, k2: 用私钥加密的 AES 密钥 }
@@ -8,12 +9,14 @@
   4) body = RSA-PKCS1#1v1.5 每 117 字符一块，块字节拼接后 base64（前端 encryptLong 等价）
   5) POST /api/video/subtitleExtract  body=body  header 带 KdSystem: Kedou
 
-输出：B 站每个分 P 写 ``<out>/kedou_NN.json``，YouTube 写 ``<out>/kedou_<视频ID>.json``，
-其中 ``data.subtitleItemVoList[0].content`` 即 SRT 文本。
+输出：``<out>/kedou_<视频ID>.json``，其中 ``data.subtitleItemVoList[0].content``
+即 SRT 文本（部分平台 content 为空、只有 srcUrl，脚本会自动下载回填）。
 注意：连续请求约 10 次后会限流（code:500），默认每次请求间隔 --delay 秒。
 
+设计约定：本流水线只处理**单个视频**；多个视频对每个视频重复调用即可。
+
 用法:
-    python subtitle_fetch.py --out <subs目录> --bv BV1xxxx --parts 1,2,3 [--delay 6]
+    python subtitle_fetch.py --out <subs目录> --bv BV1xxxx
     python subtitle_fetch.py --platform youtube --bv dQw4w9WgXcQ --out <subs目录>
 """
 from __future__ import annotations
@@ -41,19 +44,10 @@ HTTP_HEADERS = {
 }
 REQUEST_TIMEOUT_SEC = 30
 
-# 支持的视频平台配置：视频页 URL 构造 与 分 P 语义（part 仅 B 站多 P 用到）
-#   - url:      kedou 用它定位视频；YouTube 单视频忽略 part
-#   - resolve_parts: B 站按 --parts 展开；YouTube 单视频固定 [1]，
-#     与流水线的 pNN 目录约定对齐（两个平台共用同一套逻辑）
-PLATFORM_CONFIG = {
-    "bilibili": {
-        "url": lambda video_id, part: f"https://www.bilibili.com/video/{video_id}/?p={part}",
-        "output_name": lambda video_id, part: f"kedou_{part:02d}.json",
-    },
-    "youtube": {
-        "url": lambda video_id, part: f"https://www.youtube.com/watch?v={video_id}",
-        "output_name": lambda video_id, part: f"kedou_{video_id}.json",
-    },
+# 支持的视频平台：视频页 URL 构造规则
+PLATFORM_URLS = {
+    "bilibili": lambda video_id: f"https://www.bilibili.com/video/{video_id}/",
+    "youtube": lambda video_id: f"https://www.youtube.com/watch?v={video_id}",
 }
 
 # RSA 分块参数（对应前端 encryptLong：文本不超过该长度时单块加密，否则按 RSA_CHUNK_SIZE 分块）
@@ -137,7 +131,7 @@ def rsa_encrypt_long(modulus: int, exponent: int, key_byte_length: int,
     )
 
 
-# ---------------------------------------------------------------- AES-128-CBC（纯 Python 实现）
+# ---------------------------------------------------------------- AES-CBC（纯 Python 实现）
 _SBOX = bytes.fromhex(
     "637c777bf26b6fc53001672bfed7ab76ca82c97dfa5947f0add4a2af9ca472c0"
     "b7fd9326363ff7cc34a5e5f171d8311504c723c31896059a071280e2eb27b275"
@@ -280,74 +274,53 @@ def resolve_subtitle_content(response: dict) -> str:
     content = item.get("content") or ""
     if content or not item.get("srcUrl"):
         return content
-    request = urllib.request.Request(item["srcUrl"], headers={"User-Agent": HTTP_HEADERS["User-Agent"]})
+    request = urllib.request.Request(item["srcUrl"],
+                                     headers={"User-Agent": HTTP_HEADERS["User-Agent"]})
     with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SEC) as resp:
         content = resp.read().decode("utf-8", errors="replace")
     item["content"] = content
     return content
 
 
-def resolve_parts(platform: str, parts_arg: str) -> list[int]:
-    """把 --parts 解析为分 P 列表：B 站按逗号展开，YouTube 固定为 [1]。
-
-    与 download_video.py 的同名函数保持同一语义：流水线统一按分 P
-    （pNN）组织，YouTube 无多 P 概念，固定映射为单个分 P。
-    """
-    if platform == "bilibili":
-        return [int(p.strip()) for p in parts_arg.split(",")]
-    return [1]
-
-
-def build_video_url(platform: str, video_id: str, part: int) -> str:
+def build_video_url(platform: str, video_id: str) -> str:
     """按平台构造视频页 URL（kedou 用它定位视频）。"""
-    config = PLATFORM_CONFIG.get(platform)
-    if config is None:
-        raise ValueError(f"不支持的平台: {platform}（可选: {', '.join(PLATFORM_CONFIG)}）")
-    return config["url"](video_id, part)
+    builder = PLATFORM_URLS.get(platform)
+    if builder is None:
+        raise ValueError(f"不支持的平台: {platform}（可选: {', '.join(PLATFORM_URLS)}）")
+    return builder(video_id)
 
 
-def build_output_path(out_dir: str, platform: str, video_id: str, part: int) -> str:
-    """构造输出 JSON 路径：B 站按分 P 命名，YouTube 用视频 ID 命名。"""
-    name = PLATFORM_CONFIG[platform]["output_name"](video_id, part)
-    return os.path.join(out_dir, name)
-
-
+# ---------------------------------------------------------------- CLI
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="通过 kedou.life 抓取视频平台的 AI 字幕")
-    parser.add_argument("--out", required=True, help="输出目录（存 kedou_NN.json）")
+    parser.add_argument("--out", required=True, help="输出目录（存 kedou_<视频ID>.json）")
     parser.add_argument("--bv", required=True,
                         help="视频 ID：B 站为 BV 号，YouTube 为 11 位视频 ID")
-    parser.add_argument("--platform", default="bilibili", choices=sorted(PLATFORM_CONFIG),
+    parser.add_argument("--platform", default="bilibili", choices=sorted(PLATFORM_URLS),
                         help="视频平台，默认 bilibili")
-    parser.add_argument("--parts", default="1",
-                        help="B 站分 P 列表，如 1,2,3（YouTube 忽略此参数）")
     parser.add_argument("--delay", type=float, default=6,
-                        help="相邻分 P 请求间隔秒数（限流防护），默认 6")
+                        help="（保留参数，兼容旧脚本）请求间隔秒数，默认 6")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
     os.makedirs(args.out, exist_ok=True)
-    parts = resolve_parts(args.platform, args.parts)
+    video_url = build_video_url(args.platform, args.bv)
+    output_path = os.path.join(args.out, f"kedou_{args.bv}.json")
+    try:
+        response = fetch_subtitle(video_url)
+        subtitle_items = (response.get("data") or {}).get("subtitleItemVoList") or []
+        srt_text = resolve_subtitle_content(response)
+        with open(output_path, "w", encoding="utf-8") as f:
+            json.dump(response, f, ensure_ascii=False)
+        print(f"{args.bv}: ok code={response.get('code')} "
+              f"status={response.get('data', {}).get('status')} "
+              f"tracks={len(subtitle_items)} srt_bytes={len(srt_text.encode('utf-8'))} -> {output_path}")
+    except Exception as exc:
+        print(f"{args.bv}: ERR {exc}")
+        raise SystemExit(1)
 
-    for index, part in enumerate(parts):
-        video_url = build_video_url(args.platform, args.bv, part)
-        output_path = build_output_path(args.out, args.platform, args.bv, part)
-        label = args.bv if args.platform == "youtube" else f"p{part}"
-        try:
-            response = fetch_subtitle(video_url)
-            subtitle_items = (response.get("data") or {}).get("subtitleItemVoList") or []
-            srt_text = resolve_subtitle_content(response)
-            with open(output_path, "w", encoding="utf-8") as f:
-                json.dump(response, f, ensure_ascii=False)
-            print(f"{label}: ok code={response.get('code')} "
-                  f"status={response.get('data', {}).get('status')} "
-                  f"tracks={len(subtitle_items)} srt_bytes={len(srt_text.encode('utf-8'))} -> {output_path}")
-        except Exception as exc:  # 逐条容错：单个分 P 失败不影响后续分 P
-            print(f"{label}: ERR {exc}")
-        if index != len(parts) - 1:
-            time.sleep(args.delay)
 
 if __name__ == "__main__":
     main()
