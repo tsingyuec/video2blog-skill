@@ -19,47 +19,24 @@
 - ✍️ **内建写作规范**：金字塔写作风格 + SCQA 开篇 + "初学者可读"的术语解释（详见 `reference/blog-writing.md`）
 - 🔁 **通顺化工作流**：字幕逐句拼接往往不通顺，提供「按窗口导出 → 改写 → 写回」循环工具
 
-## 安装
+## 手动安装
 
 ```bash
 pip install -r requirements.txt   # opencv-python、numpy、pillow、yt-dlp
 # 无桌面环境可把 opencv-python 换成 opencv-python-headless
 ```
 
-作为 Agent Skill 使用：把本仓库放入技能目录（如 Claude Code 的 `~/.claude/skills/video2blog/`），或通过 skills CLI 安装：
+作为 Agent Skill 使用可通过 skills CLI 安装（自动将本仓库放入技能目录 `~/.agent/skills/video2blog/`）：
 
 ```bash
 npx skills add tsingyuec/video2blog-skill
 ```
 
-## 快速开始
+## 由你的Agent安装
 
-以 YouTube 视频 `SYuSZIIYOfI` 为例（B 站把 `--platform youtube` 换掉、`--bv` 传 BV 号即可）：
-
-```bash
-# 1. 下载视频流（仅视频，不需要音频/ffmpeg；体积过大用 --height 720）
-python scripts/download_video.py --workdir <workdir> --platform youtube --bv SYuSZIIYOfI --height 720
-
-# 2. 1fps 抽帧
-python scripts/extract_frames.py --workdir <workdir>
-
-# 3. 抓取 AI 字幕
-python scripts/subtitle_fetch.py --platform youtube --bv SYuSZIIYOfI --workdir <workdir>
-
-# 4. 生成「图-字幕」原始文稿（--diff/--minwin/--maxwin 控制去重粒度）
-python scripts/build_transcript.py --workdir <workdir> --platform youtube \
-  --bv SYuSZIIYOfI --title "<视频标题>"
-
-# 5. （可选）逐窗口通顺化：导出 → 人工/AI 改写 → 写回
-python scripts/transcript_windows.py dump <workdir>/transcripts/<视频ID>.md 0 600
-python scripts/transcript_windows.py apply <workdir>/transcripts/<视频ID>.md << 'REWRITE'
-00005|改写后的通顺文本……
-REWRITE
-
-# 6. 基于原始文稿写博客（Agent Skill 模式下由 Agent 按 SKILL.md 第 5 步完成）
 ```
-
-完整参数说明、去重参数调优、常见故障排查见 [`SKILL.md`](SKILL.md)。
+Use the skills in "https://github.com/tsingyuec/video2blog-skill" that are relevant to the current task. Run `npx skills add "https://github.com/tsingyuec/video2blog-skill"` and select the relevant skills, then follow their instructions.
+```
 
 ## 产物目录约定
 
@@ -96,10 +73,6 @@ scripts/
 - [yt-dlp](https://github.com/yt-dlp/yt-dlp) — 视频下载
 - [kedou.life](https://www.kedou.life) — 在线字幕解析服务
 - [anthropics/skills](https://github.com/anthropics/skills) — Agent Skill 规范
-
-## 免责声明
-
-仅供个人学习与笔记整理；涉及第三方站点的接口随政策变化可能失效。
 
 ## License
 
