@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""通过 kedou.life 在线字幕服务抓取 B 站 AI 字幕。纯 Python 标准库实现（零 pip 依赖）。
+"""通过 kedou.life 在线字幕服务抓取视频平台的 AI 字幕（支持 B 站 / YouTube）。纯 Python 标准库实现（零 pip 依赖）。
 
 接口 body 需要 RSA+AES 加密（逆向自其前端，详见 reference/kedou-api.md）：
   1) GET  /api/auth/keys              -> { k1: RSA 公钥, k2: 用私钥加密的 AES 密钥 }
@@ -8,12 +8,13 @@
   4) body = RSA-PKCS1#1v1.5 每 117 字符一块，块字节拼接后 base64（前端 encryptLong 等价）
   5) POST /api/video/subtitleExtract  body=body  header 带 KdSystem: Kedou
 
-输出：每个分 P 写 ``<out>/kedou_NN.json``，其中
-``data.subtitleItemVoList[0].content`` 即 SRT 文本。
+输出：B 站每个分 P 写 ``<out>/kedou_NN.json``，YouTube 写 ``<out>/kedou_<视频ID>.json``，
+其中 ``data.subtitleItemVoList[0].content`` 即 SRT 文本。
 注意：连续请求约 10 次后会限流（code:500），默认每次请求间隔 --delay 秒。
 
 用法:
     python subtitle_fetch.py --out <subs目录> --bv BV1xxxx --parts 1,2,3 [--delay 6]
+    python subtitle_fetch.py --platform youtube --bv dQw4w9WgXcQ --out <subs目录>
 """
 from __future__ import annotations
 
@@ -39,6 +40,12 @@ HTTP_HEADERS = {
     "Content-Type": "application/json",
 }
 REQUEST_TIMEOUT_SEC = 30
+
+# 支持的视频平台及「视频页 URL」构造规则（part 仅 B 站多 P 用到）
+VIDEO_URL_BUILDERS = {
+    "bilibili": lambda video_id, part: f"https://www.bilibili.com/video/{video_id}/?p={part}",
+    "youtube": lambda video_id, part: f"https://www.youtube.com/watch?v={video_id}",
+}
 
 # RSA 分块参数（对应前端 encryptLong：文本不超过该长度时单块加密，否则按 RSA_CHUNK_SIZE 分块）
 RSA_SINGLE_BLOCK_LIMIT = 245
@@ -250,11 +257,29 @@ def fetch_subtitle(video_url: str) -> dict:
     return request_json(EXTRACT_ENDPOINT, body)
 
 
+def build_video_url(platform: str, video_id: str, part: int) -> str:
+    """按平台构造视频页 URL（kedou 用它定位视频）。"""
+    builder = VIDEO_URL_BUILDERS.get(platform)
+    if builder is None:
+        raise ValueError(f"不支持的平台: {platform}（可选: {', '.join(VIDEO_URL_BUILDERS)}）")
+    return builder(video_id, part)
+
+
+def build_output_path(out_dir: str, platform: str, video_id: str, part: int) -> str:
+    """构造输出 JSON 路径：B 站按分 P 命名，YouTube 用视频 ID 命名。"""
+    name = f"kedou_{part:02d}.json" if platform == "bilibili" else f"kedou_{video_id}.json"
+    return os.path.join(out_dir, name)
+
+
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="通过 kedou.life 抓取 B 站 AI 字幕")
+    parser = argparse.ArgumentParser(description="通过 kedou.life 抓取视频平台的 AI 字幕")
     parser.add_argument("--out", required=True, help="输出目录（存 kedou_NN.json）")
-    parser.add_argument("--bv", required=True, help="视频 BV 号")
-    parser.add_argument("--parts", required=True, help="分 P 列表，如 1,2,3")
+    parser.add_argument("--bv", required=True,
+                        help="视频 ID：B 站为 BV 号，YouTube 为 11 位视频 ID")
+    parser.add_argument("--platform", default="bilibili", choices=sorted(VIDEO_URL_BUILDERS),
+                        help="视频平台，默认 bilibili")
+    parser.add_argument("--parts", default="1",
+                        help="B 站分 P 列表，如 1,2,3（YouTube 忽略此参数）")
     parser.add_argument("--delay", type=float, default=6,
                         help="相邻分 P 请求间隔秒数（限流防护），默认 6")
     return parser.parse_args()
@@ -263,21 +288,23 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     os.makedirs(args.out, exist_ok=True)
-    parts = [part.strip() for part in args.parts.split(",")]
+    parts = [part.strip() for part in args.parts.split(",")] if args.platform == "bilibili" else ["1"]
 
     for index, part in enumerate(parts):
-        video_url = f"https://www.bilibili.com/video/{args.bv}/?p={part}"
-        output_path = os.path.join(args.out, f"kedou_{int(part):02d}.json")
+        part_number = int(part)
+        video_url = build_video_url(args.platform, args.bv, part_number)
+        output_path = build_output_path(args.out, args.platform, args.bv, part_number)
+        label = args.bv if args.platform == "youtube" else f"p{part}"
         try:
             response = fetch_subtitle(video_url)
             with open(output_path, "w", encoding="utf-8") as f:
                 json.dump(response, f, ensure_ascii=False)
             subtitle_items = (response.get("data") or {}).get("subtitleItemVoList") or []
-            print(f"p{part}: ok code={response.get('code')} "
+            print(f"{label}: ok code={response.get('code')} "
                   f"status={response.get('data', {}).get('status')} "
                   f"tracks={len(subtitle_items)} -> {output_path}")
         except Exception as exc:  # 逐条容错：单个分 P 失败不影响后续分 P
-            print(f"p{part}: ERR {exc}")
+            print(f"{label}: ERR {exc}")
         if index != len(parts) - 1:
             time.sleep(args.delay)
 

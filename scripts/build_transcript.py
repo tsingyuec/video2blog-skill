@@ -15,6 +15,8 @@
 用法:
     python build_transcript.py --workdir <dir> --bv BV1xxxx --title "视频标题" \\
         --parts 1,2,3 --diff 12 --minwin 5 --maxwin 25
+    python build_transcript.py --platform youtube --bv dQw4w9WgXcQ --title "标题" \
+        --parts 1 --workdir <dir>
 """
 from __future__ import annotations
 
@@ -33,6 +35,14 @@ from PIL import Image
 THUMBNAIL_SIZE = (32, 18)
 # 无字幕且短于该秒数的窗口直接丢弃（多为转场/空屏）
 MIN_KEPT_WINDOW_SEC = 3
+
+# 时间戳跳转链接构造规则：{t} 为窗口起点秒（YouTube 的 t=秒数 同样有效）
+JUMP_URL_BUILDERS = {
+    "bilibili": lambda video_id, part, t: (
+        f"https://www.bilibili.com/video/{video_id}/?p={part}&t={t}"),
+    "youtube": lambda video_id, part, t: (
+        f"https://www.youtube.com/watch?v={video_id}&t={t}"),
+}
 
 
 @dataclass
@@ -53,8 +63,10 @@ class Window:
 
 
 # ---------------------------------------------------------------- 字幕导出与解析
-def export_srt_from_kedou_json(workdir: str, part: int) -> None:
-    """把 kedou_NN.json 中的 SRT 文本导出为 subs/pNN.srt 与 subs/pNN.txt。
+def export_srt_from_kedou_json(workdir: str, part: int, platform: str = "bilibili",
+                               video_id: str = "") -> None:
+    """把 kedou_NN.json（B 站）或 kedou_<视频ID>.json（YouTube）导出为
+    subs/pNN.srt 与 subs/pNN.txt。
 
     已存在 srt 时跳过（幂等）；json 缺失或内容为空时静默返回，由后续
     流程报告「缺少字幕」。
@@ -68,6 +80,8 @@ def export_srt_from_kedou_json(workdir: str, part: int) -> None:
         os.path.join(workdir, "subs", f"kedou_{part:02d}.json"),
         os.path.join(workdir, "subs", f"kedou_{part}.json"),
     ]
+    if platform != "bilibili" and video_id:
+        json_candidates.insert(0, os.path.join(workdir, "subs", f"kedou_{video_id}.json"))
     for json_path in json_candidates:
         if not os.path.exists(json_path):
             continue
@@ -161,10 +175,10 @@ def split_into_windows(frame_files: list[str], options: WindowingOptions) -> lis
 
 # ---------------------------------------------------------------- 文稿生成
 def build_transcript(workdir: str, bv: str, title: str, part: int,
-                     options: WindowingOptions) -> None:
+                     options: WindowingOptions, platform: str = "bilibili") -> None:
     """为第 ``part`` 个分 P 生成 transcripts/pNN.md；缺帧或缺字幕时跳过。"""
     part_name = f"p{part:02d}"
-    export_srt_from_kedou_json(workdir, part)
+    export_srt_from_kedou_json(workdir, part, platform, bv)
 
     frame_files = sorted(glob.glob(os.path.join(workdir, "frames", part_name, "*.jpg")))
     srt_path = os.path.join(workdir, "subs", part_name + ".srt")
@@ -197,7 +211,7 @@ def build_transcript(workdir: str, bv: str, title: str, part: int,
             continue  # 无字幕且太短的窗口（转场/空屏）直接丢弃
 
         timestamp_label = f"{window.start_sec // 60:02d}:{window.start_sec % 60:02d}"
-        jump_url = f"https://www.bilibili.com/video/{bv}/?p={part}&t={window.start_sec}"
+        jump_url = JUMP_URL_BUILDERS[platform](bv, part, window.start_sec)
         image_name = f"{window.start_sec:05d}.jpg"
         shutil.copyfile(window.frame_path, os.path.join(image_dir, image_name))
         kept_count += 1
@@ -219,7 +233,10 @@ def build_transcript(workdir: str, bv: str, title: str, part: int,
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="生成「图片-字幕」原始文稿")
     parser.add_argument("--workdir", required=True, help="工作目录")
-    parser.add_argument("--bv", required=True, help="视频 BV 号，如 BV1xxxx")
+    parser.add_argument("--bv", required=True,
+                        help="视频 ID：B 站为 BV 号，YouTube 为 11 位视频 ID")
+    parser.add_argument("--platform", default="bilibili", choices=sorted(JUMP_URL_BUILDERS),
+                        help="视频平台（决定跳转链接格式与字幕文件名），默认 bilibili")
     parser.add_argument("--title", required=True, help="视频标题（写入文稿一级标题）")
     parser.add_argument("--parts", required=True, help="分 P 列表，如 1,2,3")
     parser.add_argument("--diff", type=float, default=12.0,
@@ -239,7 +256,7 @@ def main() -> None:
         max_window_sec=args.maxwin,
     )
     for part in (int(x) for x in args.parts.split(",")):
-        build_transcript(args.workdir, args.bv, args.title, part, options)
+        build_transcript(args.workdir, args.bv, args.title, part, options, args.platform)
 
 
 if __name__ == "__main__":
