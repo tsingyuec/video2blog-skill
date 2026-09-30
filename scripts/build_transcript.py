@@ -193,7 +193,6 @@ def build_transcript(workdir: str, video_id: str, title: str,
         "",
         "| 字幕文本 | 画面 |",
         "| :--- | ---: |",
-        "",
     ]
 
     kept_count = 0
