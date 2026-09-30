@@ -1,315 +1,280 @@
-# 显卡（GPU）的工作原理：它为什么和 CPU 不一样，又是如何把 36 万亿次计算塞进一张卡里的
+# 第7讲：并行训练（一）——集合通信、硬件互连与数据/张量/流水线并行
 
 ## 本讲要解决的核心问题（SCQA）
 
-**背景**：我们每天都在用电脑打游戏、跑 AI，显卡（GPU）是现代电脑里最贵的部件之一，它和 CPU 一样都是"处理器"，都插在主板上，都能做计算。
+**背景（Situation）**：上一讲我们把视角缩小到**单块 GPU 内部**，学会了用 kernel、tiling、shared memory 等技巧让一块卡跑得更快。这节课要把镜头拉远：你手里不再只有一张卡，而可能是 4 张、8 张甚至 1000 张 GPU，它们彼此用各种线缆连在一起。([【跳转到 00:04】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=4))
 
-**冲突**：但 GPU 和 CPU 长得完全不同——CPU 只有 24 个核心，GPU 却有上万个核心；跑游戏时 CPU 常常很闲，GPU 却满载。更奇怪的是，为什么一张显卡每秒能做 36 万亿次计算，却连一个操作系统都跑不起来？
+**冲突（Complication）**：多卡并不自动等于更快。麻烦有两类：一来，**模型根本装不下**——参数、激活值、梯度和优化器状态会超出单卡显存（比如一张 B200 的显存也就一百多 GB 的量级，要训练一个 1T＝一万亿参数的模型，单卡完全不可能）；二来，即便装得下，为了**更快**而把任务拆到多张卡上，就必须付出**通信**的代价——数据要从一块 GPU 搬到另一块 GPU，而搬运远比计算慢。([【跳转到 01:43】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=103))
 
-**疑问**：GPU 内部到底是怎么设计的？它为什么能同时处理海量数据？它和 CPU 的分工边界在哪里？除了打游戏，它还能做什么？
+**疑问（Question）**：我们怎样把计算合理地"编排"到多张 GPU 上——用什么样的通信原语、在什么样的硬件层级上传输、又如何把模型或数据切开，才能让通信不成为瓶颈？
 
-**回答（中心思想）**：GPU 的核心思想是**"用更多的核心、更简单的计算单元，去并行处理海量且互不依赖的数据"**。它把算力堆在数量上，牺牲了灵活性，因此特别适合"令人尴尬的并行"任务——图形渲染、比特币挖矿、神经网络都是这一类。本文分两部分：先拆开显卡看它的**物理架构**，再理解它的**计算架构**，最后看看这两种架构如何匹配到挖矿和 AI 上。
+**回答（Answer，结论先行）**：本讲给出三样东西：① **集合通信（collective operations）**——分布式编程的基本词汇；② **GPU 之间的物理连接**——从 NVLink/NVSwitch 到 InfiniBand/Ethernet 的带宽阶梯，它决定了什么能放在哪里；③ 用 `torch.distributed` 从零实现的**三种并行策略**——数据并行（DDP）、张量并行、流水线并行。贯穿全部内容的心法只有一句：**计算单元离数据越远越慢，一切优化都是为了让"搬数据"不要成为瓶颈**——单 GPU 时代数据远在 HBM 里，多 GPU 时代数据可能在另一块卡上，但原则不变。用很多 GPU 很容易，高效用好它们却很难。([【跳转到 01:00】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=60)、[【跳转到 01:25】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=85))
 
-![一张显卡每秒约 36 万亿次计算，相当于 4400 个地球上所有人每秒各算一次](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00060.jpg)
+上一讲的 fusion/tiling 是"减少对内存的访问"；这一讲的主题与之对偶——**通过在 GPU 之间做适当的复制与分片，减少通信量**。([【跳转到 02:23】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=143))
 
----
-
-## 一、GPU 与 CPU 的本质区别：一个是货船，一个是喷气机
-
-### 1.1 核心数量不是唯一答案
-
-先看一个最直观的对比。在这张显卡内部，图形处理单元 GPU 拥有**超过 1 万个核心**；而安装在主板上的 CPU（中央处理器）这个集成电路，只有 **24 个核心**。[【跳转到 01:56】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=116)
-
-1 万个比 24 个多得多，所以你可能会认为 GPU 更强大。但真正的情况要复杂得多——核心数量只是故事的一部分。
-
-![GPU 与 CPU 的核心数量对比：GPU 上万核心 vs CPU 24 核心](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00126.jpg)
-
-### 1.2 一个有用的比喻：货船 vs 喷气机
-
-理解两者差异，最有效的办法是类比：
-
-- 把 **GPU 想象成一艘巨大的货船**——货仓容量极大，能一次性搬运海量货物，但慢、笨重、只能在港口之间航行。
-- 把 **CPU 想象成一架巨型喷气式飞机**——载货量小，但速度快、极其灵活，能在成千上万个机场起降。
-
-这里的"货仓容量"对应的是**能同时处理的计算量和数据量**，而"船或飞机的速度"对应的是**处理这些计算和数据的速度**。本质上，这是同一枚硬币的两面：
-
-> **一边是"大量计算、执行较慢"，另一边是"少量计算、执行更快"——这就是吞吐量与延迟之间的权衡。** [【跳转到 02:37】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=157)
-
-![货船（GPU）与喷气机（CPU）：货仓容量 vs 速度与灵活性的取舍](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00147.jpg)
-
-### 1.3 灵活性上的巨大差距
-
-除了吞吐量，另一个关键区别是**灵活性**：
-
-- 飞机可以运载乘客、包裹或集装箱，可以在成千上万个机场起降——**CPU 同样灵活**，可以运行各种不同的程序和指令。
-- 巨型货船只能装载大容量的标准集装箱，只能在港口之间航行——**GPU 的灵活性远不及 CPU**，它只能运行简单的指令，比如基本的算术运算。
-
-更极端的例子是：**GPU 无法运行操作系统，也无法直接与输入设备或网络连接**。这个比喻并不完美，但它很好地回答了"CPU 和 GPU 哪个更快"这个问题——答案是：**取决于任务**。[【跳转到 03:12】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=192)
-
-### 1.4 什么时候该用谁
-
-总结成一张判断表：
-
-| 你的任务 | 更合适的选择 |
-| --- | --- |
-| 对**海量数据**执行**同一组**计算 | GPU 更快 |
-| 需要评估的数据量小得多 | CPU 更快 |
-| 运行操作系统、支持网络连接、驱动各种硬件 | CPU |
-| 运行各种通用应用程序 | CPU |
-
-[【跳转到 03:35】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=215)
+> 课堂提醒：这一讲的示例代码默认使用多进程（multiprocessing），但讲者为了逐行演示，幻灯片上展示的是单进程（single process）模式下的输出。([【跳转到 03:23】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=203))
 
 ---
 
-## 二、拆开一张显卡：从 PCB 到 GPU 芯片
+## 一、集合通信：分布式训练的"共同语言"
 
-### 2.1 显卡的物理构成
+### 1.1 rank、world size 与八个操作
 
-显卡的中心是一块**印刷电路板（PCB）**，上面安装着各种组件。整张卡可以大致分为几块：
+**集合通信（collective operations）** 是一类分布式编程的基础原语，历史可以追溯到 **1980 年代**——它们不是为大语言模型发明的，但今天依然在用。所谓"集合"（collective），指你指定的是**跨多个设备的通用通信模式或模板**，而不是自己去管理点对点（point-to-point）通信——这样简单得多，系统也能帮你做更多事情，是一种非常成熟可靠的并行编程接口。([【跳转到 04:42】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=282))
 
-- **GPU 芯片**——显卡的"大脑"，我们后面重点拆解。
-- **显存芯片**——存储即将被处理的数据。
-- **供电模块**——大多数较小的元件构成了电压调节器，它把输入的 **12 伏电压转换为约 1.1 伏**，并向 GPU 提供数百瓦的功率。
-- **散热系统**——因为功率会转化为热量，显卡的大部分重量都集中在散热器上；散热器用四根热管把 GPU 和显存的热量传导到散热片，再由风扇带走。
-- **接口**——一侧是连接显示器的各种端口，另一侧是 12V 电源接口，底部是连接到主板的 **PCIe** 针脚。[【跳转到 04:15】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=255)
+约定两个术语（讲者自己也觉得叫法有点怪，但这是并行编程的标准说法）：
 
-![显卡的组成：PCB 上的 GPU、显存、供电，以及 DisplayPort/HDMI 输出接口](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00573.jpg)
+- **rank**：一个特定的设备（例如 0、1、2、3），在本课里 rank 就是 GPU（也可以是 TPU 等其他设备）；
+- **world size**：设备总数（例子里是 4）。
 
-### 2.2 GA102：GPU 芯片的层级结构
+([【跳转到 05:23】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=323))
 
-打开 GPU，里面是一个巨大的芯片，本文以 **GA102** 为例——它由 **283 亿个晶体管**构成，芯片的大部分面积被层级结构的处理核心占据。它的组织方式是一层套一层的：
+![集合通信的设定：四个 rank（world size = 4）。操作分为三档——broadcast/scatter/gather/reduce 是入门热身，all-gather/reduce-scatter/all-reduce 是训练主力，all-to-all 服务于 MoE。](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/p07/00323.jpg)
 
-1. 整个芯片分为 **7 个图形处理集群（GPC, Graphics Processing Cluster）**；
-2. 每个 GPC 内有 **12 个流多处理器（SM, Streaming Multiprocessor）**；
-3. 每个 SM 内部包含 **4 个 warp 调度单元 + 1 个光线追踪核心**；
-4. 每个 warp 内部包含 **32 个 CUDA（着色）核心 + 1 个张量核心**。
+本讲覆盖八个操作。前四个是热身，后面的才是训练中反复出现的"主力"：
 
-把这些乘起来，整个 GPU 拥有：**10752 个 CUDA 核心、336 个张量核心和 84 个光线追踪核心**。[【跳转到 04:36】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=276)
-
-![GA102 的层级结构：GPC → SM → warp → CUDA/张量/光追核心](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00281.jpg)
-
-### 2.3 三种核心，各司其职
-
-这三种核心执行 GPU 的所有计算，但分工不同：
-
-| 核心类型 | 通俗理解 | 主要用途 |
+| 操作 | 含义 | 类比 |
 | --- | --- | --- |
-| **CUDA 核心** | 简单的二进制计算器（有加法、乘法按钮） | 运行游戏时使用最频繁，做通用浮点/整数运算 |
-| **张量核心** | 矩阵乘法和加法计算器 | 几何变换、神经网络与人工智能 |
-| **光线追踪核心** | 数量最少、功能最专一 | 执行光线追踪算法，模拟真实光影 |
+| broadcast | 把某个 rank（如 rank 0）上的张量复制给所有 rank | 一个人念，所有人抄 |
+| scatter | 把一个大张量切分后分散到各 rank | 把一叠牌发给每个人 |
+| gather | scatter 的逆操作，把各 rank 的片段拼到某个 rank 上 | 把大家的牌收回一人手里 |
+| reduce | 在各 rank 的部分数据上做规约（如求和），结果放到某个 rank | 收齐后求和 |
+| all-gather | 对**所有** rank 都做 gather，人人拿到完整数据 | 每个人都抄一份全集 |
+| reduce-scatter | 对每个分量先规约，再把结果分散到不同 rank | 分工求和，各存一块 |
+| all-reduce | ＝ reduce-scatter + all-gather，把规约结果复制到所有 rank | 人人都有完整的和 |
+| all-to-all | 每个 rank 指定向哪个 rank 发送哪些元素 | 一次全员互换通信 |
 
-[【跳转到 05:13】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=313)
+几个热身操作的补充细节：
 
-![芯片中重复排列的 CUDA 核心、张量核心与光线追踪核心](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00308.jpg)
+- **broadcast** 一般不出现在训练的核心路径里，多用于初始化阶段——比如加载一个初始检查点再广播给所有 rank，大概只做一次。([【跳转到 06:53】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=413))
+- **scatter** 本身不直接使用，但它是理解 reduce-scatter 的基石；**gather** 同理，是理解 all-gather 的基石。([【跳转到 07:23】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=443))
+- **reduce** 对函数式编程的人来说并不陌生：执行某种满足**结合律和交换律**的运算（sum、max 等），结果放到指定 rank。有趣的是，gather 也可以看作一种 reduce——它的"规约"就是**拼接（concatenation）**。([【跳转到 08:23】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=503))
+- 课堂问答：这里的 broadcast 和 NumPy 的 broadcasting 是不是一回事？讲者的回答是**概念上同源**（把一个东西分发给多个），但因为这是集体通信，实现上有所不同。还有同学问 gather/reduce 的目标 rank 是不是固定死——不是，调用时**指定 rank 即可**，只是必须在调用时确定。([【跳转到 09:10】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=550))
 
-### 2.4 一个芯片，多个型号：良品率与"屏蔽"
+> 记忆口诀：reduce 就是"规约"（满足结合律/交换律的运算）；scatter 是 gather 的逆操作——scatter **分散**、gather **汇聚**；"all" 表示目标是**所有**设备。所以 all-reduce＝规约后人人有份，all-gather＝汇总后人人有份。([【跳转到 15:04】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=904))
 
-一个相当有趣、甚至违反直觉的事实是：**3080、3090、3080 Ti、3090 Ti 都使用相同的 GA102 芯片**。它们价格不同、发布年份也不同，为什么能用同一颗芯片？
+### 1.2 all-reduce = reduce-scatter + all-gather：最重要的一条等式
 
-原因在于**制造缺陷**。在制造过程中，有时会因为图案错误、灰尘颗粒或其他问题导致芯片出现缺陷区域。工程师不会因为一个小缺陷就丢弃整个芯片，而是**找到缺陷区域，永久隔离并停用附近的电路**。由于 GPU 是高度重复的设计，一个核心中的小缺陷通常只会损坏特定的 SM，而不影响芯片的其他区域。
+**all-gather**：每个 rank 只有一片参数或数据，all-gather 之后每个 rank 都拿到**完整**的数据。这正是后面"分片存储、用时收集"模式的基石——训练中我们会反复看到"先 gather 干点事，再 scatter，再 gather、再 scatter"的节奏。([【跳转到 09:34】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=574))
 
-于是芯片会根据缺陷数量被**测试和分类（装箱）**：
+![all-gather：四个 rank 各持有标量 0、1、2、3，操作后每个 rank 都拿到 [0,1,2,3]，即"gather 到所有 rank"。](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/p07/00604.jpg)
 
-| 型号 | 可用 CUDA 核心数 |
-| --- | --- |
-| 3090 Ti | 10752（完美无瑕，全部正常） |
-| 3090 | 10496 |
-| 3080 Ti | 10240 |
-| 3080 | 8704（相当于 16 个 SM 被停用） |
+**reduce-scatter**：它 = 在张量的**每个分量**上分别做 reduce，然后把结果散给各 rank。例子里四个 rank 各持有一个错位的向量，逐分量求和得到 [6,10,14,18]，四个分量分别留在四个 rank 上。反向传播后要把不同数据分片算出的梯度加总、再重新分配存储，用的正是它。([【跳转到 10:34】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=634)、[【跳转到 11:04】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=664))
 
-除了核心数，不同型号的最大时钟频率、显存数量与代数也不同。[【跳转到 06:16】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=376)
+**all-reduce**：对一堆张量做规约（如求和），再把结果复制给所有 rank。从"最容易理解"的角度看，它就是"先 reduce-scatter、再 all-gather"两步。注意这个等价关系，下一讲 ZeRO/FSDP 的所有巧妙操作都建立在这条等式上：**因为 all-reduce 可以拆成两步，我们才可能"介入"并对中间状态做分片**。基础版的数据并行用单体 all-reduce 就够了；要进阶到 ZeRO/FSDP，就得把它拆开掌控。([【跳转到 11:34】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=694)、[【跳转到 12:34】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=754))
 
-![制造缺陷被隔离停用：Good 单元保留，Damaged 单元被停用](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00406.jpg)
+![reduce-scatter 与 all-reduce：输入是四个 rank 上错位的向量，reduce-scatter 把每个分量各自求和后分散存放；而 all-reduce 等于 reduce-scatter + all-gather，把 [6,10,14,18] 复制到所有 rank。](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/p07/00724.jpg)
 
----
+### 1.3 all-to-all 与 MoE 的动态路由
 
-## 三、走进一个 CUDA 核心：41 万个晶体管的"计算器"
+**all-to-all** 是最通用的：每个 rank 既可以持有数据的一个切片，也可以持有一组专家（expert）。MoE 的动态路由最终就变成一次 all-to-all——查自己的数据决定把哪些激活值发给哪些专家。若负载均衡（每个 rank 发给其他 rank 的字节数相同），它本质上就是一次**矩阵转置**；实操中最好让划分尽量均衡——这正是 MoE 里"负载均衡损失"存在的原因。当然 all-to-all 也能处理负载不均的情况，可以向任意 rank 发送任意数量的字节，只是均衡时效率最好。([【跳转到 13:04】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=784)、[【跳转到 14:34】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=874))
 
-### 3.1 FMA：最常用的运算
-
-放大其中一个 CUDA 核心，这个"简单计算器"内部布局了大约 **41 万个晶体管**，其中约 **5 万个**负责执行一条关键运算：
-
-> **A × B + C**，即**融合乘加（FMA, Fused Multiply-Add）**。
-
-这是显卡最常用的运算。核心还分成两半：一半使用 **32 位浮点数**（本质上是科学计数法）执行 FMA，另一半则处理 **32 位整数或浮点数**。核心的其他部分负责位移位、位掩码，以及收集和排队传入的指令与操作数，最后累加并输出结果。[【跳转到 07:30】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=450)
-
-![一个 CUDA 核心内部：FMA 运算单元与数据通路](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00465.jpg)
-
-### 3.2 算力从哪来：核心数 × 频率 × 每周期运算
-
-既然单个核心只能做"简单的计算器"，那么 36 万亿次的计算能力从何而来？答案是把海量核心堆起来：
-
-- 一个核心**每个时钟周期**完成**一次乘法 + 一次加法**；
-- 3090 有 **10496 个核心**，主频约 **1.7GHz**；
-- 相乘就得到 **约 35.6 万亿次/秒** 的计算能力。[【跳转到 08:22】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=502)
-
-![算力 = 核心数 × 频率 × 每周期运算次数](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00512.jpg)
-
-### 3.3 特殊功能单元：处理除法、开方、三角函数
-
-除法、平方根、三角函数等更复杂的运算，则由**特殊功能单元（SFU）**执行。这些单元的数量要少得多——**每个 SM 中只有 4 个**。这也解释了为什么 GPU 擅长"简单的重复运算"，而不擅长复杂单线程逻辑。[【跳转到 08:37】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=517)
+![all-to-all：四个 rank 各自把 4 个元素按目的 rank 发出，收完以后每个 rank 得到一组转置后的数据；MoE 的 token 路由就是这种模式。](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/p07/00844.jpg)
 
 ---
 
-## 四、GPU 的"后勤"：显存、带宽与高速接口
+## 二、硬件互连：带宽阶梯决定并行边界
 
-### 4.1 加载画面在等什么
+### 2.1 从 PCIe/Ethernet 到 NVLink/NVSwitch
 
-无论何时启动游戏或看到加载屏幕，等待的时间主要都花在**把特定场景或环境的所有 3D 模型从固态硬盘搬到显存芯片上**。GPU 的共享二级缓存只有 **6MB**，相对于庞大的游戏环境只是冰山一角，所以数据块需要在显存和 GPU 之间不断传输。
+要理解并行为什么有代价，先要看 GPU 之间的"路"修得怎么样。把它放进一个广义的存储/通信层次结构里就很清晰：最局部的是单节点单 GPU 内部的寄存器、L1/L2 cache、shared memory，最快；往外是 HBM——上一讲我们还在抱怨它慢，这一讲却要把它当作"高速存储"；再往外是单节点多 GPU，通过 NVLink 连到 NVSwitch；最外层是多节点，通过 InfiniBand 或 Ethernet 互联。([【跳转到 01:30】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=90))
 
-由于核心每秒要持续执行数十万亿次计算，**GPU 是一台数据饥渴的机器**，需要持续不断的 TB 级数据输入。一旦"后勤"跟不上，再多的核心也会饿着。[【跳转到 10:23】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=623)
+最朴素的配置是：服务器里有 CPU、PCIe 总线（过去连鼠标键盘都走它）、若干 GPU 和内存，同一节点上的 GPU 走 PCIe，机器之间用 Ethernet 连接——讲者吐槽：这就像你买了游戏显卡、和朋友用网线连起来说"我要训练大模型"，那你就只能这么干。([【跳转到 17:06】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=1026))
 
-![数据块在显存与 GPU 之间持续高速传输](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00658.jpg)
+但真正认真做大模型训练时，配置更接近下面这样（[【跳转到 18:15】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=1095)）：
 
-### 4.2 显存带宽：多台起重机同时装货
+- 每个节点通常配 **8 块 GPU**，通过 **NVLink** 连接到 **NVSwitch**；从编程视角看，你可以把任意一块 GPU 当作"直接连到"其他任何一块——实际路由交给硬件。以 NVLink 5.0 为例，总带宽达到 **1.8 TB/s**，而 B200 的 HBM 带宽是 **8 TB/s**——NVLink 大约只有 HBM 的四分之一（但比跨网络仍快得多，当然还是比不上 shared memory 或 L1/L2 cache）。
+- 集群规模变大后，节点被放进 **pod**，用 **InfiniBand** 互联（经 PCIe → HCA/网卡 → InfiniBand 线缆），带宽约 **0.05 TB/s** 量级，比 NVLink 低得多；GPU 不再直接连 GPU，中间要过好几道环节。
+- 再往外，pod 之间只能用 **Ethernet**，数据还得经过 CPU，更慢。这就像内存层次结构：节点越多，越不可能让一个 NVSwitch 去伺候大约 10 万块 GPU。
 
-如果把 GPU 比作货船，那么显存芯片的设计就像**多台起重机同时装载货船**：
+![典型硬件拓扑：每个节点 8 块 GPU 经 NVLink 连到 NVSwitch，NVSwitch 再经 InfiniBand/Ethernet 引出；下方给出每层带宽与"绕过 CPU"的说明。](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/p07/01095.jpg)
 
-- 这款显卡的 **24 块显存芯片**每次总共传输 **384 位**数据，这个宽度称为**总线宽度**；
-- 由此得到的总传输速率（**带宽**）约为 **每秒 1.15TB**。
+### 2.2 RDMA 与 RoCE：绕过 CPU 是关键
 
-作为对比，支持 CPU 的 **DRAM 内存条只有 64 位总线宽度**，最大带宽接近**每秒 64GB**——相差近一个数量级。这正是"货船式"吞吐量的来源。[【跳转到 11:08】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=668)
+一个重要的硬件细节是**绕过 CPU**。传统 Ethernet 下，GPU 必须先把数据拷给 CPU（内核套接字缓冲区——这里的 kernel 指操作系统内核，不是 GPU kernel），由内核组装网络数据包、再复制到网卡发出，延迟很大。**RDMA（Remote Direct Memory Access，远程直接内存访问）** 让一块 GPU 直接读写另一块 GPU 的内存，整个过程不需要 CPU 参与。NVLink/NVSwitch 与 InfiniBand 都天然支持 RDMA；标准 Ethernet 不支持，但有 **RoCE（RDMA over Converged Ethernet，基于融合以太网的 RDMA）** 来补上——InfiniBand 通常价格不菲，RoCE 让较便宜的以太网也能拿到相当不错的性能；Meta 发过论文研究这个方向，Llama 的训练可能用了融合以太网、也可能没用到。([【跳转到 20:21】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=1221)、[【跳转到 22:03】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=1323))
 
-![显存总线宽度与带宽对比 CPU 内存](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00673.jpg)
+要区分两组概念：**InfiniBand、NVSwitch、NVLink 说的是硬件**（有哪些线缆和交换机），**RDMA 说的是操作层面**（通信时到底发生了什么）。实现 RDMA 有多种方式：NVLink/NVSwitch 是一种，InfiniBand 是一种，RoCE 又是一种。([【跳转到 24:51】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=1491))
 
-### 4.3 不止 0 和 1：PAM3 与 PAM4 编码
+### 2.3 NVL72：把"极快域"从 8 卡扩到 72 卡
 
-你可能会认为计算机只用二进制（0 和 1）工作。但为了提高数据传输速率，现代显存使用**多种电压电平**，而不只是两个：
+NVIDIA 一直在突破单域规模：面向 B200/B300 的 **NVL72** 用 9 个托盘、每托盘 8 块 GPU，把 **72 块 GPU** 连进同一个 NVLink 域。物理上是这样的：每个托盘装两块 Grace CPU，每块 CPU 连 4 块 GPU（所以每托盘 8 块），托盘堆叠起来、全部连到 NVSwitch。普通用户只有 8 卡在"极快域"内，而 NVLink 域之外速度会骤降。([【跳转到 21:29】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=1289)、[【跳转到 24:28】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=1468))
 
-- **GDDR7** 使用三种电平的编码方案 **PAM3**，把二进制位组合成"三进制数字"（PAM3 符号），电压分别为 0、1、2。它把 3 个二进制位编码成 2 个三进制数字，再与"11 位→7 个三进制数字"的方案结合，最终用 176 个三进制数字发送 276 个二进制位。
-- 上一代的 **GDDR6X**（也就是这款 3090 用的内存）采用的是 **PAM4**，使用四种电压电平一次发送两位数据。
+![NVL72 与 RoCE：9 个托盘、每托盘 8 块 GPU 共 72 卡同处一个 NVLink 域；以及 RoCE 让以太网也能绕过 CPU。](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/p07/01316.jpg)
 
-行业后来一致同意：在新一代显存中改用 **PAM3**，因为这样可以**降低编码器复杂度、提高信噪比、提升能效**。[【跳转到 11:33】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=693)
-
-![二进制到三进制的转换：PAM3 把 3 bit 编成 2 个三进制数字](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00723.jpg)
-
----
-
-## 五、GPU 的计算哲学：SIMD 与"令人尴尬的并行"
-
-### 5.1 什么是"令人尴尬的并行"
-
-听上去有点傻，但"**令人尴尬的并行**"（Embarrassingly Parallel）是计算机问题的一种**技术分类**：指那些**几乎不需要任何努力就能分解成并行任务**的问题。视频游戏渲染和比特币挖矿都属于这一类——每个像素、每个哈希的计算彼此独立，可以随意拆开分给不同核心。
-
-### 5.2 SIMD：单指令多数据
-
-GPU 处理这类问题用的是 **SIMD** 原理，即 **Single Instruction Multiple Data（单指令多数据）**：
-
-> **同一条指令或步骤，会在数千到数百万个不同的数字上重复执行。**
-
-这正是 GPU 高效的根本来源——一次发令，成千上万个数据同时被处理。[【跳转到 13:25】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=805)
-
-![SIMD：单指令多数据](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00810.jpg)
-
-### 5.3 一个例子：牛仔帽的顶点变换
-
-视频里用一顶 3D 牛仔帽来演示。这顶帽子由约 **2.8 万个三角形**组成，这些三角形通过约 **1.4 万个顶点**构成。每个顶点都有 X、Y、Z 坐标，用所谓**模型空间**的坐标系描述，其原点 (0,0,0) 位于帽子中心。
-
-为了把帽子放进一个 3D 世界，我们需要把所有顶点从各自的模型空间**变换到共享的世界坐标系（世界空间）**。做法非常能体现 SIMD 的威力：
-
-1. 用**一条指令**把"帽子在世界空间的原点位置"加到"模型空间中单个顶点的 XYZ 坐标"上；
-2. **把这条指令复制到其他上万条顶点数据上**；
-3. 对桌子和场景中其他数百个对象重复同样的操作，只是每次用不同的世界坐标和顶点数据。
-
-最终，**5629 个物体、总共 830 万个顶点**被一次性变换到同一坐标系，相当于做了 **2500 万次加法**。整个过程的关键在于：**这数百万次计算中，每一次都不依赖任何其他计算**，所以可以随意分发到 GPU 的数千个核心上并行完成。[【跳转到 13:55】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=835)
-
-![牛仔帽顶点从模型空间变换到世界空间](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00845.jpg)
-
-> 小提醒：这只是相当复杂的图形渲染流水线的**第一步**，此外还省略了旋转和缩放变换——它们也是类似的、需要额外 SIMD 计算的过程。
+课堂问答的延伸：**"有 9 块 GPU 怎么办？"**——取决于拓扑。若第 9 块落在另一个节点、且两节点之间没有 NVLink/NVSwitch，配置就会非常糟糕：那个节点算力少、通信成本还极高；但如果所有设备都挂在 NVSwitch 上，情况就合理多了。([【跳转到 26:21】](https://www
+一句话总结这张"带宽地图"：**shared memory < HBM < NVLink/NVSwitch（单节点 8 卡）< InfiniBand（pod 内）< Ethernet（跨 pod 或跨数据中心）**。后面选择并行策略时，本质上就是在问："这种通信需要多快的链路？"
 
 ---
 
-## 六、从 SIMD 到 SIMT：线程如何映射到硬件
+## 三、从概念到代码：NCCL 与 torch.distributed
 
-### 6.1 线程、warp、线程块、网格
+### 3.1 NCCL：把集合操作"翻译"成 GPU 之间的真实数据包
 
-计算架构如何落到物理硬件上？对应关系非常清晰：
+最底层是 **NCCL（NVIDIA Collective Communications Library，读作"nickel"）**：它把 all-reduce、reduce、broadcast 等集合操作翻译成 GPU 之间实际传输的底层数据包。当你调用一次 all-reduce，NCCL 会**分析硬件拓扑**（有多少节点、交换机，走 NVLink 还是 PCIe）、**决定通信路径**（环形还是树形）并**启动 GPU kernel** 来收发数据——别忘了 GPU 上跑的一切归根结底都是 kernel，通信也不例外（还有专门负责与其他 GPU 通信的通信 kernel）。([【跳转到 23:17】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=1397))
 
-1. **一条指令 = 一个线程**，线程与单个 **CUDA 核心**匹配；
-2. 线程被捆绑成 **32 个线程一组，称为 warp**，同一 warp 的所有线程执行相同的指令序列；
-3. **warp 组成线程块（Block）**，由 **SM** 处理；
-4. **线程块组成网格（Grid）**，在整个 GPU 上计算。
+![NCCL：它把集合操作翻译成底层数据包，检测硬件拓扑并选择路径，最终以 GPU kernel 的形式启动收发。](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/p07/01397.jpg)
 
-所有这些都由 **GigaThread 引擎**统一管理或调度，它高效地把线程块映射到可用的 SM 上。[【跳转到 17:08】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=1028)
+课堂问答：NCCL 是专门针对多节点集群优化的吗？讲者的回答是：具体细节不了解，但 NVIDIA 基本一直在为其整个软件栈做大型模型训练/推理的优化——他们最大的客户就是那些大公司和语言模型提供商，如果没针对这类负载优化过，那才让人意外。([【跳转到 25:51】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=1551))
 
-![线程 → warp → 线程块 → 网格的层级，与 CUDA 核心/SM 对应](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/01003.jpg)
+### 3.2 spawn 与 setup：进程模型与协调通道
 
-### 6.2 SIMD 与 SIMT 的区别
+在 NCCL 之上，PyTorch 提供了 `torch.distributed`，后端可选 **NCCL（GPU）** 或 **gloo（CPU）**——并行编程在 GPU 出现之前就存在了，所以 CPU 上也能跑集合操作。本讲因为要在没有多 GPU 的环境里演示，用的是 gloo 后端。这个库还支持更高级的模型和算法，但本课为了"从零构建"不用那些。([【跳转到 27:48】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=1668))
 
-在传统 **SIMD** 架构中，一个 warp 里的 32 个线程**步调完全一致**——"就像一个士兵方阵一起移动"，这种同步执行方式一直用到 2016 年左右。
+- `spawn(fn, world_size=4)` 把函数 `fn` 复制运行 4 次，每个进程占据一个 rank（0 到 world_size−1），彼此**异步**、完成顺序任意交错——打印语句出现的顺序就是由硬件决定的任意顺序。([【跳转到 28:25】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=1705))
+- `setup` 配置 `MASTER_ADDR/MASTER_PORT`。注意它**不是** GPU 之间的数据通路，只用于通用的元数据和协调；真正的数据必须走 NCCL，否则会非常慢。([【跳转到 29:17】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=1757))
 
-较新的 GPU 则采用 **SIMT（Single Instruction Multiple Thread，单指令多线程）**。两者的区别是：
+### 3.3 barrier 与同步/异步
 
-- 两者都向每个线程发送相同的指令集；
-- 但 **SIMT 下各个线程无需彼此同步**，可以以不同的速率推进——用行话来说，**每个线程都有自己的程序计数器**；
-- 此外在 SIMT 模式下，SM 中所有线程共享 **128KB 的 L1 缓存**，因此一个线程输出的数据可以被另一个线程直接使用。
+- `dist.barrier()` 是**同步屏障**：一旦遇到它，进程就会等待所有其他进程都走到这一步才继续。因为进程之间是异步的、谁先跑完没有保证，所以需要它来确保"某些代码先于其他代码执行"；代价是可能产生不必要的等待。([【跳转到 29:47】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=1787))
+- **同步 vs 异步**：`dist.all_reduce(tensor, op=ReduceOp.SUM, async_op=False)` 是同步且**原地写回**——调用后张量内容立刻就是结果；`async_op=True` 会立即返回，之后你可以去做别的事情，最后用 `wait()` 确认完成。使用异步的典型场景是**让计算与通信重叠**：发完通信请求后去处理独立的数据或计算（比如加载下一步需要的数据），等真正需要结果时再同步。([【跳转到 33:13】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=1993)、[【跳转到 33:50】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=2030))
 
-这种改进让 GPU 在遇到 **warp 发散**（warp divergence）时，能更灵活地处理数据相关的条件分支，也更容易让线程重新收敛、达成屏障同步。**一句话：新架构在处理代码分支时更灵活、更高效。** [【跳转到 17:44】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=1064)
+### 3.4 现场演示：all-reduce、reduce-scatter 与 all-gather
 
-![SIMT（单指令多线程）：从数据输入到结果输出](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/01064.jpg)
+讲者现场演示了 all-reduce：四个 rank 分别持有 `[0,1,2,3]`、`[1,2,3,4]`、`[2,3,4,5]`、`[3,4,5,6]`，all-reduce（求和）之后每个 rank 都得到 `[6,10,14,18]`——这正是"每一列的和被复制到所有 rank"。([【跳转到 30:51】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=1851))
 
-### 6.3 冷知识：warp 一词的来历
-
-你可能以为 warp 源自《星际迷航》里的"曲速引擎"（warp drive），但它实际上来自**编织**，尤其是 1804 年的**提花织机**——那台机器用可编程穿孔卡从一组纱线中挑出特定的纱线，织出复杂图案。这种"按指令选择"的思想，正是可编程计算的雏形。
+接着演示 reduce-scatter：这次**不做原地写入**，而是分别传入输入和输出两个张量——输入基本没被改动，输出里每个分量的规约结果写进对应的 rank。最后把 reduce-scatter 的输出作为输入做 all-gather，得到完整数据复制到所有 rank。这样就用代码实际验证了那条最重要的等式：**all-reduce = reduce-scatter + all-gather**。收尾时讲者还调用了清理环境的函数（`destroy_process_group` 一类的操作）——"清理环境是个好习惯"。([【跳转到 32:02】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=1922)、[【跳转到 34:56】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=2096))
 
 ---
 
-## 七、GPU 还能干什么（一）：比特币挖矿
+## 四、量出通信有多快：all-reduce 的有效带宽
 
-### 7.1 挖矿的本质：SHA-256 彩票
+### 4.1 两个陷阱：warmup 与"两层异步"
 
-要在区块链上创建一个区块，需要对一组数据（交易、时间戳、附加数据，以及一个称为 **nonce** 的随机数）运行 **SHA-256 哈希算法**，输出一个 256 位的随机值。
+光知道"能通信"不够，还要**量出通信有多快**。做基准测试时有两个陷阱要避开：
 
-可以把这想象成一台彩票生成器：你无法直接选择号码，但算法会根据输入数据生成一个随机号码。**改变 nonce，其他数据不变，就能得到一个全新的彩票号码。** [【跳转到 19:31】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=1171)
+- 先 **warmup**（预热），因为第一次调用往往包含初始化开销；
+- 用 `torch.cuda.synchronize()` 等待 **CUDA kernel** 真正结束，再用 `dist.barrier()` 等待**所有进程**都到达同一点。为什么要两个都要？因为系统里存在两层异步：每个进程内的 CUDA 操作默认异步（Python 执行下一行时 kernel 可能还没跑完），进程之间也彼此异步。只加 barrier 并不够——如果 kernel 还在运行，各进程只是各自简单地越过了屏障，并没有真正同步。([【跳转到 35:56】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=2156)、[【跳转到 40:36】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=2436))
 
-![SHA-256 哈希机：输入交易数据与 nonce，输出一张随机"彩票"](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/01186.jpg)
+### 4.2 公式：有效带宽与世界大小、拓扑无关
 
-### 7.2 为什么显卡适合挖矿
+然后把时钟套在操作外面，算出**发了多少字节**、**花了多少时间**。示例对一亿个元素做 all-reduce，耗时约 1.6 毫秒——这算快还是慢？要算有效带宽：
 
-挖矿的获胜条件是：**第一个随机出的号码其前 80 位全为零**（其余 176 位无关紧要）。GPU 的玩法就是把机器开足马力、疯狂摇彩票：
+```text
+sent_bytes   = size_bytes × 2 × (world_size − 1)   # 2 = 发送+规约；W−1 = 规约迭代步数
+total_time   = world_size × duration               # 对所有 rank 加权
+effective_BW = sent_bytes / total_time
+```
 
-> 用**相同的交易和时间戳**，但不断更换 nonce，对 SHA-256 做**数千次迭代**。像这样的显卡每秒能生成大约 **9500 万个 SHA-256 哈希值**。
+因子的来历：W 个 rank 两两合并求和需要 W−1 步迭代；每步既要**发送**又要**规约**，所以乘 2；时间上对 world_size 个 rank 加权取总量。([【跳转到 37:28】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=2248))
 
-这又一次是"令人尴尬的并行"：每个 nonce 的计算互不依赖，天生适合 SIMD/SIMT。
+随着 `W` 增大，`(W−1)/W → 1`，于是 **`effBW ≈ 2S / T`——有效带宽与世界大小无关，也与拓扑（环形还是树形由 NCCL 决定）无关**。示例中测出约 **400 GB/s**，而且这个数字不随 GPU 数量增加而变差。这正是 all-reduce 被广泛使用的原因。([【跳转到 38:11】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=2291))
 
-### 7.3 ASIC 的碾压
+![有效带宽的测量：代码里 `sent_bytes = size_bytes * 2 * (world_size - 1)`，再除以总持续时间；注释指出有效带宽与世界大小和拓扑无关。](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/p07/02248.jpg)
 
-不过今天的情况已经变了。装满 **ASIC（专用集成电路）** 的矿机每秒可以执行 **250 万亿次哈希运算，相当于约 2600 张显卡**。所以在真正的挖矿现场，显卡在一台 ASIC 矿机旁边**看起来就像一把勺子**——专用硬件的效率是通用显卡无法企及的。[【跳转到 20:58】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=1258)
+### 4.3 reduce-scatter 对照：少做一半事，带宽却相同
 
-![在 ASIC 矿机旁，显卡就像一把勺子](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/01273.jpg)
+reduce-scatter 的测法类似，但字节数**不乘 2**（只有发送、没有单独的规约步骤），量级同样是 400 GB/s 左右（有时有些随机性，大致 400 多）。用一个统一的视角看：**all-reduce 做了 reduce-scatter 和 all-gather 两份工作，所以移动两倍数据，但它也花了两倍时间——两者相互抵消，于是带宽相同**。([【跳转到 39:10】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=2350)、[【跳转到 39:36】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=2376))
 
 ---
 
-## 八、GPU 还能干什么（二）：张量核心与 AI
+## 五、数据并行（DDP）：只比标准训练多一步
 
-### 8.1 张量核心做什么
+### 5.1 切数据、不切模型：反向传播后 all-reduce 梯度
 
-生成式 AI 和神经网络内容极其庞大，需要多个完整视频才能讲清。这里只聚焦张量核心解决的**精确矩阵数学**：
+讲者用最基础的 MLP 来演示三种并行——别忘了 **MLP 才是 Transformer 里真正的计算瓶颈**，所以这个例子很具代表性。([【跳转到 41:31】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=2491))
 
-> 张量核心接收**三个矩阵**，把**前两个矩阵相乘**，再**加上第三个矩阵**，然后输出结果。
+**数据并行**的做法是把**数据**拆开：batch 维切成 world_size 份，每个 rank 拿 `batch_size / world_size` 行数据（比如 batch 128、4 个 rank，每个 rank 处理 32 行），但**每个 rank 都维护完整的一份参数**。实际训练中每个 rank 通常会加载自己的数据以避免瓶颈，演示里只是为了方便。前向、反向都和普通训练一模一样，区别只在反向传播之后：对所有参数的梯度做一次 all-reduce 并取平均，于是各 rank 的梯度一致，参数更新后也保持一致。([【跳转到 42:15】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=2535)、[【跳转到 44:15】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=2655))
 
-以输出的一个值为例：它等于**第一个矩阵第一行**与**第二个矩阵第一列**对应元素相乘之和，再加上**第三个矩阵的相应值**。由于三个输入矩阵的所有值都同时准备好，张量核心可以**同时完成所有矩阵乘加运算**——这就是它比一个 CUDA 核心快得多的原因。[【跳转到 21:23】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=1283)
+![数据并行：每个 rank 拿到数据的一部分（图中 Data 被沿 batch 维切开），但都持有完整的层级参数。](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/p07/02535.jpg)
 
-![张量核心的矩阵乘加：A×B + C = D](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/01304.jpg)
+```python
+loss.backward()
+# 标准训练与 DDP 的唯一区别，就是下面这三行：
+for param in params:
+    dist.all_reduce(tensor=param.grad, op=dist.ReduceOp.AVG, async_op=False)
+optimizer.step()
+```
 
-### 8.2 为什么 AI 需要它
+### 5.2 优雅在模块化，约束在 batch size
 
-神经网络和生成式人工智能需要**数万亿到数千万亿次**矩阵乘法与加法运算，而且通常使用**更大的矩阵**。矩阵乘加天然是"可以同时进行"的海量重复运算，正好命中 GPU 最擅长的领域。这也是为什么用于游戏的显卡，会成为训练和运行 AI 模型的主力硬件。
+它优雅在**模块化**：DDP 不关心前向传播长什么样，它只负责"同步参数"这件事——换成 Transformer 也一样，前向照旧、DDP 只对参数做平均（有同学问"Transformer 的 DDP 长什么样"，答案就是：基本一样）。两个约束：batch size **至少不小于 world size**（否则有的卡分不到数据），且最好是其整数倍（否则要补零填充——办法是有的，只是整数倍大家都省事）。([【跳转到 45:29】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=2729)、[【跳转到 46:01】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=2761))
 
-![矩阵乘加的计算细节：第一个矩阵的行与第二个矩阵的列对应相乘再求和](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/01216.jpg)
+![DDP 的关键一行：反向传播后对每个参数的梯度做 all-reduce（取平均），其余代码与单卡训练相同。](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/p07/02685.jpg)
+
+### 5.3 致命局限：内存零节省
+
+数据并行有一个致命局限：**内存毫无节省**——每个 GPU 都存着参数的完整副本，显存占用随卡数线性增长。各个 rank 的损失值不一样、梯度一开始也不一样，但经过规约后就都一致了。如果参数太大根本装不下，就得靠下一讲的 ZeRO/FSDP 把状态分片——all-reduce 像一个"简单的单体操作"，它要求把模型的所有参数都保留在内存里。([【跳转到 46:26】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=2786)、[【跳转到 46:56】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=2816))
+
+---
+
+## 六、张量并行：沿"宽度"切，用通信量换显存
+
+### 6.1 列式切分与 all-gather
+
+如果说数据并行切的是**数据**，**张量并行（tensor parallelism）** 切的就是**每一层的参数矩阵**：数据不切，每个 rank 只持有每层的一部分维度，因此每个 rank 都能算出**部分激活值**。代价从一开始就注定：通常需要传输的数据量会大得多。([【跳转到 47:07】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=2827)、[【跳转到 47:11】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=2831))
+
+具体做法（本讲演示**列式切分**；按行切也行，这里先不展开）：把每层的参数矩阵沿**列**方向切成 world_size 份，rank i 拿第 i 份。前向传播时，各 rank 用自己那份参数对完整输入 `X` 做矩阵乘法，得到形状为 `batch × 局部维度` 的部分激活；非线性激活函数是逐元素的，局部算完全没问题；然后通过 **all-gather** 把所有 rank 的激活收集齐全，再拼接成完整维度的 `X`，进入下一层——每一层都要这么做一遍。([【跳转到 48:06】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=2886)、[【跳转到 49:36】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=2976))
+
+![张量并行：每个 rank 只持有参数矩阵的一部分（列式切分），前向得到部分激活后用 all-gather 拼成完整激活。](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/p07/03006.jpg)
+
+这里有一个漂亮的对偶关系：**前向做 all-gather，则反向就做 reduce-scatter**（梯度要按各自的切分散回去）；反之亦然。all-gather 和 reduce-scatter 就具有这种"双重性"。([【跳转到 51:06】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=3066))
+
+### 6.2 手动管理：从零构建的代价与意义
+
+要特别注意——**这一讲里整个过程是手动管理的**：你没有调用通常的 `backward` 自动微分来帮你做分布式的部分，得自己调用 reduce-scatter、自己组织前向。有同学问"这些是 autograd 自动完成的吗"——不是，直接调 `backward` 不会做这些，因为其中没有并行；但 PyTorch 其实自带这些功能，很多事情会自动为你完成。这是刻意设计：本课的目标就是"从零构建"，让你看清每一步；实际使用中（比如 PyTorch 自带的并行 API）很多工作会自动完成。([【跳转到 51:36】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=3096))
+
+还有一点值得对比：数据并行非常优雅，因为它是按数据切分的、模型被当作一个模块来对待；而张量并行**必须对模型本身动手术**——它利用了"矩阵乘法可以拆成一组小矩阵乘法、分别执行再汇总"这一事实。([【跳转到 50:06】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=3006))
+
+### 6.3 通信代价：只适合 NVLink 域内
+
+代价是**通信量大**：几乎每一层都要传输相当大的激活值，而且是 all-gather/reduce-scatter 级别的通信。因此张量并行通常**只放在节点内部**（NVLink 高带宽域），一般不超过 8 路；一旦跨出单机、走到速度慢得多的节点间网络，性能就会大幅下跌。它不会像流水线那样产生"气泡"、复杂度也较低，但非常吃带宽。([【跳转到 57:18】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=3438))
+
+---
+
+## 七、流水线并行：沿"深度"切，用 micro-batch 填满气泡
+
+### 7.1 朴素切法的"气泡"问题
+
+**流水线并行（pipeline parallelism）** 沿**深度**方向切：每个 rank 负责模型的一部分层（`local_num_layers`），但每层内部保留全部维度；rank 之间用**点对点**的 send/recv 传递激活值——rank i 从 rank i−1 接收张量、算完自己负责的层后发给 rank i+1。前向是从第 0 个 rank 一路往后传激活，反向则把部分梯度往前传回来。([【跳转到 52:36】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=3156))
+
+最自然的问题是**流水线气泡（bubble）**：如果一次只处理一个 batch，那么同一时刻只有一块 GPU 在工作，其余都在空等——没有在计算，只是在等别的张量，利用率极差。([【跳转到 54:45】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=3285))
+
+### 7.2 micro-batch 与通信/计算重叠
+
+解决办法是引入 **micro-batch**：把 batch 拆成更小的批次（演示里每 4 个一组），rank 0 处理完一个 micro-batch 立刻传给 rank 1、并马上开始处理下一个，让数据像流水线一样在层级间持续流动，从而把空闲时间压下去。([【跳转到 54:45】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=3285))
+
+**通信与计算的重叠**对流水线并行尤其关键：把接收/发送设计成异步（在函数名前加个 `i`，如 `isend/irecv`），就可以在计算的同时收发数据——"当你在这儿计算的时候，你可以同时接收或发送数据"。其实数据并行也一样：本讲的演示只做了一次前向、最后一次性 all-reduce；但如果你处理得当，反向传播中某个梯度一算完就可以开始发送，让通信"藏"在计算里，而不是等所有梯度算完再一次性 all-reduce。本讲这一部分没有展开，留给了下一讲。([【跳转到 55:33】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=3333))
+
+### 7.3 适用场景：容忍慢网络
+
+流水线并行的**通信量最小**：它只涉及层与层之间 `B×S×H`（batch × 序列长度 × 隐藏维度）的激活值传递，而不是 all-reduce 那样把整个参数矩阵翻来覆去。因此它能容忍慢得多的互联网络——一些**去中心化训练**工作会使用流水线并行，因为 GPU 节点实际上分布在世界各地；那种情况下你绝不会想用张量并行。它能否高效，取决于 batch size 和 micro-batch 的数量：micro-batch 越多，气泡占比越小。([【跳转到 55:03】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=3303)、[【跳转到 57:22】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=3442))
+
+---
+
+## 八、如何选择与组合：先用满数据并行，再按硬件层级往上叠
+
+### 8.1 硬件决定策略
+
+三种策略比较下来，选择很大程度上**取决于硬件**：
+
+- **张量并行**吃带宽，放在 NVLink 域内（节点内）；
+- **流水线并行**容忍慢网络，可以跨节点、跨 pod 使用；
+- **数据并行**最省心，但受**临界批次大小（critical batch size）** 约束：batch 加到一定程度就会收益递减，再大就是浪费算力——此时改用张量并行更划算。([【跳转到 57:52】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=3472))
+
+### 8.2 典型组合与没讲到的两种并行
+
+典型的组合是"从内到外"：**节点内张量并行 → 叠加数据并行或 FSDP → 最后用流水线并行跨节点**。除此之外还有两种本讲没细讲的并行：**序列并行**（把整个序列拆分成小块，从而实现 attention 计算的并行化）和**专家并行**（并行化 MoE 的各个专家，正是 all-to-all 大显身手之处）；不同并行技术的各种组合也会出现，这些内容在作业中都会涉及。([【跳转到 56:22】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=3382)、[【跳转到 57:52】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=3472))
+
+![三种基本并行与总结：数据并行切 batch、张量并行切宽度、流水线并行切深度；本讲末尾给出"节点内张量并行 → DP/FSDP → 跨节点流水线"的组合顺序。](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/p07/03442.jpg)
+
+### 8.3 另一条路线：JAX/TPU 的"编译器魔法"
+
+还有一种更省心的路线（如 JAX/TPU）：你只**定义模型和分片策略**——"这块数据得放在这儿、这儿和这儿"——编译器就会自动推导出所需的通信操作并完成其余"魔法"。这确实很吸引人，但代价是少了从零构建的乐趣与掌控感；本课特意选用 PyTorch、而且用很基础的方式调用集合操作，就是为了让你看得更清楚。([【跳转到 58:22】](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7&t=3502))
 
 ---
 
 ## 小结
 
-1. **GPU 与 CPU 是两种取舍**：GPU 像货船，胜在吞吐量与并行；CPU 像喷气机，胜在速度与灵活。
-2. **GPU 的算力来自"数量"**：10752 个 CUDA 核心 × 每周期一次乘加 × 1.7GHz ≈ 35.6 万亿次/秒。
-3. **芯片是层级式的**：GPC → SM → warp → CUDA/张量/光追核心；同一颗 GA102 通过屏蔽缺陷衍生出多种型号。
-4. **三种核心分工明确**：CUDA 核心做通用运算，张量核心做矩阵乘加（AI），光追核心做光线追踪。
-5. **显存是后勤命脉**：384 位总线、约 1.15TB/s 带宽，用 PAM3/PAM4 多电平编码进一步提升速率。
-6. **计算哲学是 SIMD/SIMT**：单指令作用在数百万数据上，适合"令人尴尬的并行"任务。
-7. **线程映射**：线程 → warp → 线程块 → 网格，由 GigaThread 引擎调度；SIMT 让线程可独立推进。
-8. **应用广泛**：从图形渲染，到比特币挖矿（已被 ASIC 超越），再到 AI 的矩阵计算，靠的都是同一套并行思想。
+1. **集合通信是分布式训练的语言**：broadcast/scatter/gather/reduce 是基础热身，all-gather/reduce-scatter/all-reduce 是主力，all-to-all 服务于 MoE 路由。最重要的一条等式是 **all-reduce = reduce-scatter + all-gather**——它让下一讲的 ZeRO/FSDP 成为可能。
+2. **硬件层次决定通信代价**：shared memory < HBM < NVLink/NVSwitch（单节点 8 卡，NVLink 5.0 约 1.8 TB/s）< InfiniBand（pod 内，约 0.05 TB/s）< Ethernet（跨 pod）。RDMA 让 GPU 绕过 CPU 直接访存；RoCE 把这个能力带给了以太网；NVL72 把一个 NVLink 域扩展到 72 块 GPU。
+3. **编程接口分两层**：NCCL 负责把集合操作翻译成真实数据包、探测拓扑、启动通信 kernel；`torch.distributed`（NCCL/gloo 后端）提供 `spawn/barrier/all_reduce/all_gather/reduce_scatter` 等接口，异步模式 `async_op=True` 是通信与计算重叠的基础。
+4. **测带宽要小心两层异步**：先 warmup，再用 `torch.cuda.synchronize()` + `dist.barrier()` 对齐 CUDA kernel 和进程。all-reduce 的有效带宽 `≈ 2S/T`，**与世界大小和拓扑无关**，示例约 400 GB/s；all-reduce 比 reduce-scatter 多做一倍工作、也多花一倍时间，带宽相同。
+5. **数据并行（DDP）** 只比标准训练多一步"反向后 all-reduce 梯度"，模块化、优雅，但每个 GPU 存完整副本，**内存零节省**。
+6. **张量并行**沿宽度切、每层都要通信、需手动管理，前后向存在 all-gather/reduce-scatter 的**对偶**；适合 NVLink 域内（≤8 路）。
+7. **流水线并行**沿深度切、通信量最小、能容忍慢网络，但要用 **micro-batch 压缩气泡**，并重视通信与计算的重叠。
+8. **组合原则**：先尽量把数据并行拉满；放不下时在高速域内用张量并行切开；再用流水线并行/FSDP 跨节点；batch 太小就用梯度累积补。
+
+下一讲 Tatsu 会深入 FSDP 与 ZeRO 等更高级的数据并行技术，以及真正的"4D 并行"。
 
 ---
 
@@ -317,23 +282,23 @@ GPU 处理这类问题用的是 **SIMD** 原理，即 **Single Instruction Multi
 
 | 术语 | 一句话解释 |
 | --- | --- |
-| **GPU** | 图形处理单元，显卡的"大脑"，擅长海量并行计算 |
-| **CPU** | 中央处理器，核心少但灵活，擅长复杂通用任务 |
-| **PCB** | 印刷电路板，显卡上承载所有组件的基板 |
-| **GA102** | 本文示例的 GPU 芯片，由 283 亿个晶体管构成 |
-| **GPC** | 图形处理集群，芯片的第一层分组（本芯片有 7 个） |
-| **SM** | 流多处理器，GPC 内的计算单元（每个 GPC 有 12 个） |
-| **CUDA 核心** | GPU 里数量最多的"简单计算器"，做基础算术 |
-| **warp** | 32 个线程组成的执行单位，同发一条指令 |
-| **张量核心** | 专门做矩阵乘加的单元，服务于几何变换与 AI |
-| **光线追踪核心** | 数量最少、专做光线追踪算法的单元 |
-| **FMA** | 融合乘加，即 A×B+C，显卡最常用的运算 |
-| **SFU** | 特殊功能单元，处理除法、开方、三角函数 |
-| **显存 / 带宽** | 存储待处理数据；本卡总线 384 位、带宽约 1.15TB/s |
-| **PAM3 / PAM4** | 用多个电压电平编码，一次传输更多数据 |
-| **SIMD** | 单指令多数据：一条指令作用于海量数据 |
-| **SIMT** | 单指令多线程：每条线程有独立程序计数器 |
-| **GigaThread 引擎** | GPU 内部负责调度线程块的硬件调度器 |
-| **nonce** | 挖矿时不断更换的随机数 |
-| **SHA-256** | 比特币挖矿使用的哈希算法 |
-| **ASIC** | 专用集成电路，挖矿效率远超通用 GPU |
+| rank / world size | rank 是设备编号（本课中 rank 就是 GPU），world size 是设备总数 |
+| 集合通信（collective） | 指定"跨多个设备的通用通信模式"的原语，而不是手动管理点对点通信 |
+| broadcast / scatter / gather / reduce | 复制给所有 rank / 把大张量分散 / 把各片段汇聚 / 规约到某个 rank |
+| all-gather | 每个 rank 收集齐全部片段，人人拿到完整数据 |
+| reduce-scatter | 对每个分量先规约，再把结果分散到各 rank |
+| all-reduce | reduce-scatter + all-gather，把规约结果复制到所有 rank |
+| all-to-all | 每个 rank 按指定目的地发送元素；MoE 路由的通信模式，均衡时相当于矩阵转置 |
+| NVLink / NVSwitch | 单节点内 GPU 的高速互联（NVLink 5.0 约 1.8 TB/s）与交换硬件 |
+| InfiniBand / Ethernet | 节点间/pod 间网络，带宽依次降低；前者支持 RDMA |
+| RDMA | 远程直接内存访问：GPU 直接读写另一块 GPU 的内存，不经过 CPU |
+| RoCE | 基于融合以太网的 RDMA，让较便宜的以太网也能绕过 CPU |
+| NCCL | NVIDIA 集合通信库：把集合操作翻译成底层数据包并启动 GPU kernel |
+| gloo | PyTorch 的 CPU 集合通信后端 |
+| DDP（数据并行） | 切 batch、每卡完整参数，反向传播后 all-reduce 梯度 |
+| 张量并行 | 切每层参数矩阵（宽度），前向 all-gather 激活、反向 reduce-scatter |
+| 流水线并行 | 按层切分（深度），点对点传激活，需 micro-batch 减少气泡 |
+| micro-batch | 把一个大 batch 拆成的小批次，用于填充流水线 |
+| 气泡（bubble） | 流水线中某些 GPU 无事可做的空闲时间 |
+| 有效带宽 | 传输字节数 ÷ 总耗时；all-reduce 约为 `2S/T`，与 world size 无关 |
+| 临界批次大小 | batch 增大到收益开始递减的临界点，超过它就浪费算力 |

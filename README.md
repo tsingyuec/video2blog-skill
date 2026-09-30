@@ -40,7 +40,9 @@ Use the skills in "https://github.com/tsingyuec/video2blog-skill" that are relev
 
 ## 示例输出
 
-完整示例见 [`examples/`](examples/)——由本 skill 对视频《[电脑显卡GPU的工作原理，它是如何工作的？和CPU有什么区别？](https://www.bilibili.com/video/BV12FJtzRE6W/)》完整跑一遍得到：
+由本 skill 对《[【极致中配】Stanford CS336 第 7 讲 · 并行训练](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7)》完整跑一遍得到：
+
+![示例：图-字幕原始文稿（左字幕、右代表帧，可点击时间戳）](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/docs/example.png)
 
 - [`blog.md`](examples/blog.md)：最终博客（金字塔结构 + 术语速查表 + 时间戳回链）
 - [`transcript.md`](examples/transcript.md)：第 4 步的原始文稿（图-字幕分栏，每行可回跳视频）
@@ -76,7 +78,6 @@ scripts/
     ├─ build_transcript.py        # 分栏文稿生成（窗口去重 + 字幕合并 + 时间戳）
     └─ transcript_windows.py      # 文稿通顺化：窗口导出（dump）/ 写回（apply）
 examples/
-    ├─ README.md                  # 示例说明（blog.md + transcript.md；配图在 media 分支）
     ├─ blog.md                    # 完整示例产出：最终博客
     └─ transcript.md              # 完整示例产出：图-字幕原始文稿
 ```
