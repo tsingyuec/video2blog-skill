@@ -79,7 +79,7 @@ python scripts/download_video.py --workdir "<workdir>" --platform youtube --bv <
 ## 第 2 步：按 1fps 抽帧（OpenCV）
 
 ```bash
-python scripts/extract_frames.py --workdir "<workdir>"
+python scripts/extract_frames.py --workdir "<workdir>" --bv <BV>
 ```
 
 - 帧号 = 秒数 + 1（`00001.jpg` 对应第 0 秒），与第 4 步的时间对齐。
@@ -92,10 +92,10 @@ python scripts/extract_frames.py --workdir "<workdir>"
 
 ```bash
 # B 站
-python scripts/subtitle_fetch.py --out "<workdir>/subs" --bv <BV>
+python scripts/subtitle_fetch.py --workdir "<workdir>" --bv <BV>
 
 # YouTube
-python scripts/subtitle_fetch.py --platform youtube --bv <视频ID> --out "<workdir>/subs"
+python scripts/subtitle_fetch.py --platform youtube --bv <视频ID> --workdir "<workdir>"
 ```
 
 - 输出 `subs/kedou_<视频ID>.json`，其中 `data.subtitleItemVoList[0].content` 即 SRT 文本。

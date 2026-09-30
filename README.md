@@ -44,7 +44,7 @@ python scripts/download_video.py --workdir <workdir> --platform youtube --bv SYu
 python scripts/extract_frames.py --workdir <workdir>
 
 # 3. 抓取 AI 字幕
-python scripts/subtitle_fetch.py --platform youtube --bv SYuSZIIYOfI --out <workdir>/subs
+python scripts/subtitle_fetch.py --platform youtube --bv SYuSZIIYOfI --workdir <workdir>
 
 # 4. 生成「图-字幕」原始文稿（--diff/--minwin/--maxwin 控制去重粒度）
 python scripts/build_transcript.py --workdir <workdir> --platform youtube \
