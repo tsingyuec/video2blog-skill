@@ -1,0 +1,165 @@
+---
+name: bilibili-blog
+description: "把 B 站视频（尤其是长课程/讲座）整理成图文技术博客的端到端流程：下载视频、每秒抽帧并按画面变化去重、抓取 B 站 AI 字幕、生成『图片-字幕』原始文稿（带可点击时间戳）、再按金字塔原理写成大一新生也能看懂的博客。当用户要求『把某个 B 站视频/BV号整理成博客、笔记、图文稿』时使用。"
+---
+
+# B 站视频 → 图文博客 工作流
+
+**适用**：任意 B 站视频 / 多 P 课程 / 长讲座。目标产物是**每个分 P 一篇中文技术博客**（配图来自视频原片），以及一份可核查的**原始文稿**。
+
+## 何时使用
+
+- 用户给一个 B 站链接或 BV 号，要求「整理成博客 / 学习笔记 / 图文稿 / 逐字稿配图」。
+- 特别适合**以幻灯片为主的课程、讲座、报告**：画面中大量是 PPT，适合抽帧配图。
+
+## 核心思路（一句话）
+
+> **下载→抽帧→取字幕→做「图-字幕」原始文稿→写博客**。博客必须建立在「原始文稿」之上，而不是凭空概括，这样内容可核查、不遗漏。
+
+---
+
+## 前置依赖（都在 Python 生态内，装起来省心）
+
+| 工具 | 用途 | 安装 / 检查 |
+| --- | --- | --- |
+| Python + `opencv-python`、`numpy` | 抽帧 | `pip install opencv-python numpy`（无桌面环境可装 `opencv-python-headless`） |
+| Python + `Pillow` | 图像去重、生成文稿 | `pip install pillow`（numpy 同上） |
+| `yt-dlp` | 下载 B 站视频 | `pip install -U yt-dlp` |
+
+## 目录约定
+
+在工作目录（下称 `<workdir>`）下组织：
+
+```
+<workdir>/
+├─ videos/        pNN.mp4                 # 下载的视频（仅视频流）
+├─ frames/pNN/    00001.jpg, 00002.jpg…   # 1fps 抽帧（帧号 = 秒数+1）
+├─ subs/          pNN.srt（+ kedou_NN.json）
+├─ transcripts/pNN.md                     # ★ 原始文稿（图-字幕对照）
+├─ transcripts/img/pNN/xxxxx.jpg          # 稿中保留的代表帧
+└─ blog/
+   ├─ blNN.md                             # ★ 每个分 P 一篇博客
+   └─ assets/pNN/                         # 博客配图
+```
+
+---
+
+## 第 1 步：获取信息并下载（仅视频流）
+
+```bash
+# 列出所有分 P（标题 / 时长 / 链接）
+python -m yt_dlp --no-warnings --skip-download \
+  --print "%(playlist_index)s|%(duration)s|%(title)s" "https://www.bilibili.com/video/<BV>/"
+
+# 下载指定分 P（示例 1:19），仅视频流、优先 H.264（兼容性好），无需 ffmpeg 合并
+python -m yt_dlp --no-warnings \
+  -f "bv*[height<=1080][vcodec^=avc1]/bv*[height<=1080]" \
+  -o "<workdir>/videos/p%(playlist_index)02d.%(ext)s" -I 1:19 \
+  "https://www.bilibili.com/video/<BV>/"
+```
+
+要点：
+- 字幕来自在线服务，**不需要音频**，所以只下视频流即可，避免音视频合并且不需要 ffmpeg。
+- 优先 `avc1`(H.264) 是为了让 OpenCV 解码更稳；若某些视频只有 AV1/HEVC，OpenCV 一般也能解。
+- **单 P 下载时 `%(playlist_index)s` 会变成 `NA`**，所以要么整季一起下（`-I`），要么改用固定文件名。
+- 多 P 视频可能含「中配版 / 原版」等重复分 P，先看标题确认唯一讲次再决定下载范围。
+
+## 第 2 步：按 1fps 抽帧（OpenCV）
+
+```bash
+python scripts/extract_frames.py --workdir "<workdir>" --parts 1,2,3
+```
+
+- 帧号 = 秒数 + 1（`00001.jpg` 对应第 0 秒），与第 4 步的时间对齐。
+- 默认缩放到宽 960、JPEG 质量 85；可用 `--width 0` 保留原始尺寸。
+- 速度取决于 CPU 解码，长视频会慢一些；`--force` 可强制重跑。
+
+## 第 3 步：抓取字幕（在线服务 Kedou）
+
+B 站 AI 字幕采用在线字幕服务 **kedou.life** 的接口；它对 body 做了 RSA+AES 加密，`scripts/kedou_fetch.py` 已实现（纯 Python 标准库，零依赖），直接跑：
+
+```bash
+python scripts/kedou_fetch.py --out "<workdir>/subs" --bv <BV> --parts 1,2,3
+```
+
+- 每个分 P 输出 `subs/kedou_NN.json`，其中 `data.subtitleItemVoList[0].content` 即 SRT 文本。
+- **限流**：连续请求约 10 次后返回 `code:500 请求过于频繁`。脚本默认每次间隔数秒并逐条容错；**大批量时分批、被限流后等 1–2 分钟再续**。
+- 若站点改版/失效，见 `reference/kedou-api.md` 的加密原理与排查。
+
+## 第 4 步：生成「图-字幕」原始文稿（去重 + 合并 + 时间戳）
+
+本流程的核心工件。虽然抽了 1fps，但**绝大多数相邻帧几乎一样**（同一张幻灯片停留几十秒）。做法：按**画面变化**切分时间窗口，每个窗口只保留一张代表帧，并把窗口内字幕合并。
+
+```bash
+python scripts/build_transcript.py --workdir "<workdir>" --bv <BV> \
+  --title "<视频标题>" --parts 1,2,3 --diff 12 --minwin 5 --maxwin 25
+```
+
+- 脚本会先把 `subs/kedou_NN.json` 导出为 `subs/pNN.srt`，再生成 `transcripts/pNN.md`。
+- **判据**：帧缩到 32×18 灰度做平均绝对差；与当前窗口代表帧差异 `> --diff` 且距窗口起点 `≥ --minwin` 秒 → 开新窗口；同画面最长停留 `--maxwin` 秒强制切一刀。
+- **参数经验**：`--diff 12 --minwin 5 --maxwin 25` 对课堂幻灯片约 95% 去重率。画面切换剧烈就调大 `--diff`，想更细就调小。
+- 输出为 MD 表格分栏格式（左字右图），每行一个窗口，形如：
+
+```markdown
+| 字幕文本 | 画面 |
+| :--- | ---: |
+| 该时间窗口内所有字幕合并后的文本…… [【跳转到 12:34】](https://www.bilibili.com/video/<BV>/?p=3&t=754) | <img src="img/p03/00754.jpg" width="9000"> |
+```
+
+  无字幕窗口左栏写「（此区间无字幕）」；右栏内联 `<img width="9000">`（MD 表格无法指定列宽，用图片 width 撑大右栏，链接保持可点）。
+
+**通顺化（不可跳过）**：合并出的窗口文本是字幕逐句拼接，往往不通顺（错拼、断句错位、口语碎片）。写博客前先逐窗口改写（可润色、合并断句、纠正错拼），但**不得丢信息**，只改左栏字幕文本。用 `scripts/` 里的两个工具做"导出→改写→写回"循环：
+
+```bash
+# 导出某区间窗口：输出每行形如 01202|窗口文本
+python scripts/dump_windows.py transcripts/p08.md 1202 1700
+
+# 把改写后的 NNNNN|新文本 用 heredoc 写回（⚠️ heredoc 必须写结束分隔符）
+python scripts/apply_windows.py transcripts/p08.md << 'REWRITE'
+01202|改写后的文本……
+01222|改写后的文本……
+REWRITE
+```
+
+- 每批 30–60 个窗口，导出一段、改写一段、写回一段。
+- Windows + Git Bash 终端默认 GBK：打印中文的 Python 命令要加 `PYTHONIOENCODING=utf-8`。
+- ⚠️ 通顺化后**不要重跑**本脚本——它会覆盖已改写的文稿。
+- 常见 ASR 错拼在改写时顺手替换（清单见 `reference/blog-writing.md`）。
+
+## 第 5 步：写博客（金字塔原理 + 大一可懂）
+
+对每个分 P，**基于第 4 步的原始文稿**写 `blog/blNN.md`。完整写作规范见 `reference/blog-writing.md`，要点：
+
+1. **金字塔原理**：结论先行、以上统下、归类分组（MECE）、逻辑递进；开篇用 **SCQA**（背景-冲突-疑问-回答）；一组要点 3–5 个；标题写成传递观点的判断句。
+2. **大一学生可懂**：术语首次出现用一句大白话解释并举例；每个概念讲清「是什么→为什么需要→怎么做/例子」；多用类比。
+3. 结构（**章节式**）：`# 标题` → `## 本讲要解决的核心问题（SCQA）` → `## 一、<章节名>`（内分 `### 1.1 …` 小节，通常 6–10 章）→ `## 小结` → `## 关键术语速查`。不要用「`## 要点N：…`」的平铺风格。
+4. **完整覆盖**文稿中的所有重要知识点，不得为省事而省略。
+5. 从 `transcripts/img/pNN/` 复制 8–12 张代表帧到 `blog/assets/pNN/`，用 `![图注](assets/pNN/xxxxx.jpg)` 引用。
+6. 关键处插入时间戳跳转链接（见下）。
+
+> 长文任务建议：让子任务「**分段读取文稿、边写边追加**」，避免单次动作过大导致中断。
+
+## 参数调优速查
+
+| 现象 | 调整 |
+| --- | --- |
+| 保留帧太多、内容重复 | 调大 `--diff`（如 14–16）、调大 `--minwin` |
+| 保留帧太少、漏掉幻灯片 | 调小 `--diff`（如 8–10）、调大 `--maxwin` |
+| 字幕请求被限流 | 分批下载，间隔 1–2 分钟重试 |
+| 抽帧太慢 | 降低 `--width`（如 640）或增大抽帧间隔（`--fps 0.5`） |
+| 子任务中断 | 分段读写、多次追加；或按讲次拆分并行 |
+
+## 注意事项
+
+- **字幕是 B 站 AI 生成**，可能出现识别错误（`CS336`→`cs three three nox`、人名/术语错拼）。写博客时必须纠正，且不得编造字幕之外的事实。
+- **1fps 不等于每帧都要用**：文稿/博客只保留代表帧，否则又大又冗余。
+- **版权**：仅用于个人学习与笔记整理。
+
+## 配套文件
+
+- `scripts/extract_frames.py` — 1fps 抽帧（OpenCV）
+- `scripts/kedou_fetch.py` — Kedou 字幕抓取
+- `scripts/build_transcript.py` — 图-字幕原始文稿生成
+- `scripts/dump_windows.py` / `scripts/apply_windows.py` — 文稿通顺化的"按窗口导出/写回"工具
+- `reference/kedou-api.md` — 字幕接口加密原理与维护
+- `reference/blog-writing.md` — 自包含的金字塔原理 + 写作规范
