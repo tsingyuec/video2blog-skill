@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 """生成「图片-字幕」原始文稿 —— 本工作流的核心工件。
 
-处理**单个视频**（统一映射为 ``p01``；多个视频对每个视频重复调用本脚本）：
+处理**单个视频**（产物以 ``--bv`` 视频 ID 命名，多视频共用 workdir 时靠它区分）：
   1) 若 ``subs/kedou_<视频ID>.json``（subtitle_fetch.py 的输出）存在，先导出
-     ``subs/p01.srt`` 与 ``subs/p01.txt``；
-  2) 对 ``frames/p01/`` 的 1fps 抽帧按「画面变化」切分时间窗口
+     ``subs/<视频ID>.srt`` 与 ``subs/<视频ID>.txt``；
+  2) 对 ``frames/<视频ID>/`` 的 1fps 抽帧按「画面变化」切分时间窗口
      （帧缩到 32x18 灰度，与窗口代表帧做平均绝对差）；
-  3) 每个窗口保留一张代表帧并合并窗口内字幕，输出 ``transcripts/p01.md``
-     （Markdown 表格分栏，含可点击时间戳）。
+  3) 每个窗口保留一张代表帧并合并窗口内字幕，输出 ``transcripts/<视频ID>.md``
+     （Markdown 表格分栏，含可点击时间戳，代表帧复制到 ``transcripts/img/<视频ID>/``）。
 
 ⚠️ 通顺化改写（transcript_windows.py 的 dump/apply 循环）之后不要再运行本脚本，
    否则会覆盖已改写的文稿。
@@ -36,7 +36,9 @@ THUMBNAIL_SIZE = (32, 18)
 # 无字幕且短于该秒数的窗口直接丢弃（多为转场/空屏）
 MIN_KEPT_WINDOW_SEC = 3
 
-# 时间戳跳转链接构造规则：{t} 为窗口起点秒（YouTube 的 t=秒数 同样有效）
+# 时间戳跳转链接构造规则：video_id 用 kedou 响应的 data.vid ——
+# B 站形如 BV1xx411c7mD_1（自带分 P 后缀），YouTube 即 11 位视频 ID；
+# t 为窗口起点秒（YouTube 的 t=秒数 同样有效）
 JUMP_URL_BUILDERS = {
     "bilibili": lambda video_id, t: f"https://www.bilibili.com/video/{video_id}/?t={t}",
     "youtube": lambda video_id, t: f"https://www.youtube.com/watch?v={video_id}&t={t}",
@@ -63,43 +65,43 @@ class Window:
 # ---------------------------------------------------------------- 字幕导出与解析
 def export_srt_from_kedou_json(workdir: str, video_id: str) -> None:
     """把 subs/kedou_<视频ID>.json（subtitle_fetch.py 的输出）导出为
-    subs/p01.srt 与 subs/p01.txt。
+    subs/<视频ID>.srt 与 subs/<视频ID>.txt。
 
     已存在 srt 时跳过（幂等）；json 缺失或内容为空时静默返回，由后续
     流程报告「缺少字幕」。
     """
-    srt_path = os.path.join(workdir, "subs", "p01.srt")
-    if os.path.exists(srt_path):
+    srt_path = os.path.join(workdir, "subs", video_id + ".srt")
+    json_path = os.path.join(workdir, "subs", f"kedou_{video_id}.json")
+
+    if not os.path.exists(json_path):
         return
 
-    json_candidates = [os.path.join(workdir, "subs", f"kedou_{video_id}.json")]
-    for json_path in json_candidates:
-        if not os.path.exists(json_path):
-            continue
-        try:
-            with open(json_path, encoding="utf-8") as f:
-                payload = json.load(f)
-        except (json.JSONDecodeError, OSError):
-            continue
-        subtitle_items = (payload.get("data") or {}).get("subtitleItemVoList") or []
-        if not subtitle_items:
-            continue
+    try:
+        with open(json_path, encoding="utf-8") as f:
+            payload = json.load(f)
+    except (json.JSONDecodeError, OSError):
+        return None
 
-        srt_content = subtitle_items[0].get("content", "")
-        os.makedirs(os.path.join(workdir, "subs"), exist_ok=True)
-        with open(srt_path, "w", encoding="utf-8") as f:
-            f.write(srt_content)
-        # p01.txt：去掉序号行与时间轴行，只留字幕文本，便于通顺化时参考
-        text_lines = []
-        for line in srt_content.splitlines():
-            stripped = line.strip()
-            if not stripped or re.fullmatch(r"\d+", stripped) or "-->" in stripped:
-                continue
-            text_lines.append(stripped)
-        txt_path = os.path.join(workdir, "subs", "p01.txt")
-        with open(txt_path, "w", encoding="utf-8") as f:
-            f.write("\n".join(text_lines))
-        return
+    subtitle_items = (payload.get("data") or {}).get("subtitleItemVoList") or []
+    if not subtitle_items:
+        return None
+
+    srt_content = subtitle_items[0].get("content", "")
+    os.makedirs(os.path.join(workdir, "subs"), exist_ok=True)
+    with open(srt_path, "w", encoding="utf-8") as f:
+        f.write(srt_content)
+
+    # subs.txt：去掉序号行与时间轴行，只留字幕文本，便于通顺化时参考
+    text_lines = []
+    for line in srt_content.splitlines():
+        stripped = line.strip()
+        if not stripped or re.fullmatch(r"\d+", stripped) or "-->" in stripped:
+            continue
+        text_lines.append(stripped)
+    txt_path = os.path.join(workdir, "subs", video_id + ".txt")
+    with open(txt_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(text_lines))
+    return video_id
 
 
 def parse_srt(srt_path: str) -> list[tuple[float, str]]:
@@ -167,17 +169,16 @@ def split_into_windows(frame_files: list[str], options: WindowingOptions) -> lis
 # ---------------------------------------------------------------- 文稿生成
 def build_transcript(workdir: str, video_id: str, title: str,
                      options: WindowingOptions, platform: str = "bilibili") -> None:
-    """生成 transcripts/p01.md；缺帧或缺字幕时跳过。
+    """生成 transcripts/<视频ID>.md；缺帧或缺字幕时跳过。
 
-    video_id 仅用于时间戳跳转链接；workdir 内统一使用 p01 命名。
+    video_id 即 --bv，用于定位产物与生成时间戳跳转链接。
     """
-    part_name = "p01"
     export_srt_from_kedou_json(workdir, video_id)
 
-    frame_files = sorted(glob.glob(os.path.join(workdir, "frames", "p01", "*.jpg")))
-    srt_path = os.path.join(workdir, "subs", "p01.srt")
+    frame_files = sorted(glob.glob(os.path.join(workdir, "frames", video_id, "*.jpg")))
+    srt_path = os.path.join(workdir, "subs", video_id + ".srt")
     if not frame_files or not os.path.exists(srt_path):
-        print("p01: 缺少帧或字幕，跳过")
+        print(f"{video_id}: 缺少帧或字幕，跳过")
         return
     subtitles = parse_srt(srt_path)
 
@@ -185,7 +186,7 @@ def build_transcript(workdir: str, video_id: str, title: str,
     # 每个窗口的终点 = 下一个窗口的起点；末尾用哨兵值表示视频结尾
     window_ends = [w.start_sec for w in windows[1:]] + [10 ** 9]
 
-    image_dir = os.path.join(workdir, "transcripts", "img", part_name)
+    image_dir = os.path.join(workdir, "transcripts", "img", video_id)
     os.makedirs(image_dir, exist_ok=True)
     lines = [
         f"# {title} 原始文稿（图-字幕分栏）",
@@ -213,13 +214,13 @@ def build_transcript(workdir: str, video_id: str, title: str,
         text = (segment if segment else "（此区间无字幕）").strip().replace("|", "\\|")
         lines.append(
             f"| {text} [【跳转到 {timestamp_label}】]({jump_url}) "
-            f"| <img src=\"img/{part_name}/{image_name}\" width=\"9000\"> |"
+            f"| <img src=\"img/{video_id}/{image_name}\" width=\"9000\"> |"
         )
 
-    output_path = os.path.join(workdir, "transcripts", "p01.md")
+    output_path = os.path.join(workdir, "transcripts", video_id + ".md")
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
-    print(f"p01: frames={len(frame_files)} windows={len(windows)} "
+    print(f"{video_id}: frames={len(frame_files)} windows={len(windows)} "
           f"kept={kept_count} -> {output_path}")
 
 
@@ -227,10 +228,10 @@ def build_transcript(workdir: str, video_id: str, title: str,
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="生成「图片-字幕」原始文稿")
     parser.add_argument("--workdir", required=True, help="工作目录")
+    parser.add_argument("--platform", default="bilibili", choices=sorted(JUMP_URL_BUILDERS),
+                        help="视频平台（决定跳转链接格式），默认 bilibili")
     parser.add_argument("--bv", required=True,
                         help="视频 ID：B 站为 BV 号，YouTube 为 11 位视频 ID")
-    parser.add_argument("--platform", default="bilibili", choices=sorted(JUMP_URL_BUILDERS),
-                        help="视频平台（决定跳转链接格式与字幕文件名），默认 bilibili")
     parser.add_argument("--title", required=True, help="视频标题（写入文稿一级标题）")
     parser.add_argument("--diff", type=float, default=12.0,
                         help="画面差异阈值（平均绝对差），默认 12")

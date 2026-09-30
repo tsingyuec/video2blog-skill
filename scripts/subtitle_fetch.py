@@ -9,14 +9,15 @@
   4) body = RSA-PKCS1#1v1.5 每 117 字符一块，块字节拼接后 base64（前端 encryptLong 等价）
   5) POST /api/video/subtitleExtract  body=body  header 带 KdSystem: Kedou
 
-输出：``<out>/kedou_<视频ID>.json``，其中 ``data.subtitleItemVoList[0].content``
-即 SRT 文本（部分平台 content 为空、只有 srcUrl，脚本会自动下载回填）。
+输出：``<workdir>/subs/kedou_<视频ID>.json``，其中
+``data.subtitleItemVoList[0].content`` 即 SRT 文本（部分平台 content 为空、
+只有 srcUrl，脚本会自动下载回填）。
 
-设计约定：本流水线只处理**单个视频**；多个视频对每个视频重复调用即可。
+目录约定：每个视频一个以 ``--bv``（视频 ID）命名的子目录，多个视频天然共存。
 
 用法:
-    python subtitle_fetch.py --out <subs目录> --bv BV1xxxx
-    python subtitle_fetch.py --platform youtube --bv dQw4w9WgXcQ --out <subs目录>
+    python subtitle_fetch.py --workdir <dir> --bv BV1xxxx
+    python subtitle_fetch.py --platform youtube --bv dQw4w9WgXcQ --workdir <dir>
 """
 from __future__ import annotations
 
@@ -25,7 +26,6 @@ import base64
 import json
 import os
 import random
-import time
 import urllib.request
 
 # ---------------------------------------------------------------- 服务端常量
@@ -292,7 +292,8 @@ def build_video_url(platform: str, video_id: str) -> str:
 # ---------------------------------------------------------------- CLI
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="通过 kedou.life 抓取视频平台的 AI 字幕")
-    parser.add_argument("--out", required=True, help="输出目录（存 kedou_<视频ID>.json）")
+    parser.add_argument("--workdir", required=True,
+                        help="工作目录（输出到 <workdir>/subs/kedou_<视频ID>.json）")
     parser.add_argument("--bv", required=True,
                         help="视频 ID：B 站为 BV 号，YouTube 为 11 位视频 ID")
     parser.add_argument("--platform", default="bilibili", choices=sorted(PLATFORM_URLS),
@@ -302,9 +303,10 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
-    os.makedirs(args.out, exist_ok=True)
+    subs_dir = os.path.join(args.workdir, "subs")
+    os.makedirs(subs_dir, exist_ok=True)
     video_url = build_video_url(args.platform, args.bv)
-    output_path = os.path.join(args.out, f"kedou_{args.bv}.json")
+    output_path = os.path.join(subs_dir, f"kedou_{args.bv}.json")
     try:
         response = fetch_subtitle(video_url)
         subtitle_items = (response.get("data") or {}).get("subtitleItemVoList") or []

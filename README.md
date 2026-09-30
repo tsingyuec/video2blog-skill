@@ -51,8 +51,8 @@ python scripts/build_transcript.py --workdir <workdir> --platform youtube \
   --bv SYuSZIIYOfI --title "<视频标题>"
 
 # 5. （可选）逐窗口通顺化：导出 → 人工/AI 改写 → 写回
-python scripts/transcript_windows.py dump <workdir>/transcripts/p01.md 0 600
-python scripts/transcript_windows.py apply <workdir>/transcripts/p01.md << 'REWRITE'
+python scripts/transcript_windows.py dump <workdir>/transcripts/<视频ID>.md 0 600
+python scripts/transcript_windows.py apply <workdir>/transcripts/<视频ID>.md << 'REWRITE'
 00005|改写后的通顺文本……
 REWRITE
 
@@ -65,11 +65,11 @@ REWRITE
 
 ```
 <workdir>/
-├─ videos/        p01.mp4                 # 下载的视频（仅视频流）
-├─ frames/p01/    00001.jpg, 00002.jpg…   # 1fps 抽帧（帧号 = 秒数+1）
-├─ subs/          p01.srt（+ kedou_<视频ID>.json）
-├─ transcripts/p01.md                     # ★ 原始文稿（图-字幕对照）
-├─ transcripts/img/p01/xxxxx.jpg          # 稿中保留的代表帧
+├─ videos/        video1.mp4                 # 下载的视频（仅视频流）
+├─ frames/video1/    00001.jpg, 00002.jpg…   # 1fps 抽帧（帧号 = 秒数+1）
+├─ subs/          video1.srt（+ kedou_<视频ID>.json）
+├─ transcripts/video1.md                     # ★ 原始文稿（图-字幕对照）
+├─ transcripts/img/video1/xxxxx.jpg          # 稿中保留的代表帧
 └─ blog/
    ├─ blog.md                             # ★ 本视频的博客
    └─ assets/                             # 博客配图

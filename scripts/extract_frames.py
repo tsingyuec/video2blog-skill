@@ -2,7 +2,7 @@
 """用 OpenCV 对视频按固定间隔抽帧（默认每秒 1 张）。
 
 产物与约定：
-  - 输出到 ``<workdir>/frames/p01/``，文件名 ``00001.jpg`` 对应第 0 秒，
+  - 输出到 ``<workdir>/frames/<视频ID>/``，文件名 ``00001.jpg`` 对应第 0 秒，
     即「帧号 = 秒数 + 1」，与 build_transcript.py 的时间对齐规则一致。
   - 用 ``grab()`` 跳过不需要的帧、只对目标帧 ``retrieve()``，比逐帧解码快得多。
   - 若输出目录已有超过 10 张帧图，视为已完成，跳过（``--force`` 可强制重跑）。
@@ -10,7 +10,7 @@
 依赖：``pip install opencv-python numpy``
 
 用法:
-    python extract_frames.py --workdir <dir> [--fps 1] [--width 960] [--quality 85]
+    python extract_frames.py --workdir <dir> --bv BV1xxxx [--fps 1] [--width 960] [--quality 85]
 """
 from __future__ import annotations
 
@@ -87,20 +87,20 @@ def _resize_if_needed(frame, target_width: int):
     return cv2.resize(frame, (target_width, height), interpolation=cv2.INTER_AREA)
 
 
-def extract_part(options: ExtractOptions) -> None:
-    """抽帧 videos/p01.mp4 -> frames/p01/；视频缺失或缺帧图不足时提示。"""
-    video_path = os.path.join(options.workdir, "videos", "p01.mp4")
-    out_dir = os.path.join(options.workdir, "frames", "p01")
+def extract_frames_for_video(options: ExtractOptions, video_id: str) -> None:
+    """抽帧 videos/<视频ID>.mp4 -> frames/<视频ID>/；视频缺失或缺帧图不足时提示。"""
+    video_path = os.path.join(options.workdir, "videos", video_id + ".mp4")
+    out_dir = os.path.join(options.workdir, "frames", video_id)
 
     if not os.path.exists(video_path):
-        print(f"{part_name}: 缺少视频 {video_path}")
+        print(f"缺少视频 {video_path}")
         return
     os.makedirs(out_dir, exist_ok=True)
 
     # 已抽过帧就跳过，避免长视频重复跑几分钟
     existing_frames = glob.glob(os.path.join(out_dir, "*.jpg"))
     if len(existing_frames) > 10 and not options.force:
-        print(f"{part_name}: 已存在（{len(existing_frames)} 帧），跳过；--force 可强制重跑")
+        print(f"已存在（{len(existing_frames)} 帧），跳过；--force 可强制重跑")
         return
 
     extract_frames(video_path, out_dir, options)
@@ -108,7 +108,10 @@ def extract_part(options: ExtractOptions) -> None:
 
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description="按固定间隔（默认 1fps）对视频抽帧")
-    parser.add_argument("--workdir", required=True, help="工作目录（视频为 videos/p01.mp4）")
+    parser.add_argument("--workdir", required=True,
+                        help="工作目录（视频为 videos/<视频ID>.mp4，帧存到 frames/<视频ID>/）")
+    parser.add_argument("--bv", required=True,
+                        help="视频 ID：B 站为 BV 号，YouTube 为 11 位视频 ID")
     parser.add_argument("--fps", type=float, default=1, help="抽帧频率（帧/秒），默认 1")
     parser.add_argument("--width", type=int, default=960, help="缩放宽度，0 表示原始尺寸")
     parser.add_argument("--quality", type=int, default=85, help="JPEG 质量 0-100，越大越清晰")
@@ -127,7 +130,7 @@ def main() -> None:
         quality=args.quality,
         force=args.force,
     )
-    extract_part(options)
+    extract_frames_for_video(options, args.bv)
 
 
 if __name__ == "__main__":
