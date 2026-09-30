@@ -40,7 +40,7 @@ Use the skills in "https://github.com/tsingyuec/video2blog-skill" that are relev
 
 ## 示例输出
 
-由本 skill 对《[【极致中配】Stanford CS336 第 7 讲 · 并行训练](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7)》完整跑一遍得到：
+由本 skill 对《[Stanford CS336 第 7 讲 · 并行训练](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7)》完整跑一遍得到：
 
 ![示例：图-字幕原始文稿（左字幕、右代表帧，可点击时间戳）](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/docs/example.png)
 
