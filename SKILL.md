@@ -1,6 +1,6 @@
 ---
 name: video2blog
-description: "把视频（B 站长课程/讲座、YouTube 视频）整理成图文技术博客的端到端流程：下载视频、每秒抽帧并按画面变化去重、抓取平台 AI 字幕（B 站/YouTube 走 Kedou 接口）、生成『图片-字幕』原始文稿（带可点击时间戳）、再按金字塔原理写成大一新生也能看懂的博客。只要用户提到把 B 站/YouTube 视频、BV 号、视频链接整理成博客、笔记、图文稿、逐字稿、学习笔记、视频转文字、视频配图总结——即使没有明确说『博客』——也要使用本技能。"
+description: "把视频（B 站长课程/讲座、YouTube 视频）整理成图文技术博客的端到端流程：下载视频、每秒抽帧并按画面变化去重、抓取平台 AI 字幕（ Kedou 接口）、生成『图片-字幕』原始文稿（带可点击时间戳）、再按金字塔写作风格写成大一新生也能看懂的博客。只要用户提到把 B 站/YouTube 视频、BV 号、视频链接整理成博客、笔记、图文稿、逐字稿、学习笔记、视频转文字、视频配图总结——即使没有明确说『博客』——也要使用本技能。"
 ---
 
 # B 站/YouTube 视频 → 图文博客 工作流
@@ -59,33 +59,25 @@ pip install -r requirements.txt   # opencv-python、numpy、pillow、yt-dlp
 
 ## 第 1 步：获取信息并下载（仅视频流）
 
-**B 站**（多 P 课程，`--platform bilibili`）：
+统一用 `scripts/download_video.py`（yt-dlp 封装）：只下视频流不要音频（字幕来自在线服务，无需 ffmpeg 合并）、优先 avc1/H.264（OpenCV 解码最稳）、支持断点续传。
 
 ```bash
-# 列出所有分 P（标题 / 时长 / 链接）
+# B 站（多 P，--parts 圈定范围）
+python scripts/download_video.py --workdir "<workdir>" --bv <BV> --parts 1,2,3
+
+# YouTube（单视频；分辨率过高/体积过大时用 --height 720）
+python scripts/download_video.py --workdir "<workdir>" --platform youtube --bv <视频ID> --height 720
+
+# 查看分 P 信息（标题 / 时长），决定 --parts 范围
 python -m yt_dlp --no-warnings --skip-download \
   --print "%(playlist_index)s|%(duration)s|%(title)s" "https://www.bilibili.com/video/<BV>/"
-
-# 下载指定分 P（示例 1:19），仅视频流、优先 H.264（兼容性好），无需 ffmpeg 合并
-python -m yt_dlp --no-warnings \
-  -f "bv*[height<=1080][vcodec^=avc1]/bv*[height<=1080]" \
-  -o "<workdir>/videos/p%(playlist_index)02d.%(ext)s" -I 1:19 \
-  "https://www.bilibili.com/video/<BV>/"
-```
-
-**YouTube**（单个视频，`--platform youtube`）：
-
-```bash
-python -m yt_dlp --no-warnings \
-  -f "bv*[height<=1080][vcodec^=avc1]/bv*[height<=1080]" \
-  -o "<workdir>/videos/p01.%(ext)s" \
-  "https://www.youtube.com/watch?v=<视频ID>"
 ```
 
 要点：
 - 字幕来自在线服务，**不需要音频**，所以只下视频流即可，避免音视频合并且不需要 ffmpeg。
 - 优先 `avc1`(H.264) 是为了让 OpenCV 解码更稳；若某些视频只有 AV1/HEVC，OpenCV 一般也能解。
-- **单 P 下载时 `%(playlist_index)s` 会变成 `NA`**，所以要么整季一起下（`-I`），要么改用固定文件名。
+- **单 P 下载时 `%(playlist_index)s` 会变成 `NA`**，所以要么整季一起下（`-I`），要么改用固定文件名（download_video.py 已处理）。
+- **续传**：yt-dlp 默认从 `.part` 断点续传，但**换了格式（如改 --height）旧 .part 会失效**（HTTP 416），需先删 `videos/*.part`。
 - 多 P 视频可能含「中配版 / 原版」等重复分 P，先看标题确认唯一讲次再决定下载范围。
 
 ## 第 2 步：按 1fps 抽帧（OpenCV）

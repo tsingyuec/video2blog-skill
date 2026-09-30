@@ -21,6 +21,7 @@ reference/
 ├─ blog-writing.md            # 金字塔原理 + 大一可懂写作规范（写博客前必读）
 └─ kedou-api.md               # Kedou 字幕接口：加密原理与排查（字幕报错时读）
 scripts/
+├─ download_video.py          # yt-dlp 封装：仅视频流下载，支持续传
 ├─ extract_frames.py          # OpenCV 1fps 抽帧
 ├─ subtitle_fetch.py          # Kedou 字幕抓取（纯标准库，AES/RSA 内置实现）
 ├─ build_transcript.py        # 分栏文稿生成（窗口去重 + 字幕合并 + 时间戳）
