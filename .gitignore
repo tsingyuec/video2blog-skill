@@ -1,2 +1,8 @@
 __pycache__/
 *.pyc
+workdir/
+videos/
+frames/
+subs/
+transcripts/
+blog/

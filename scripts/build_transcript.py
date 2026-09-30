@@ -1,137 +1,245 @@
-"""生成「图片-字幕」原始文稿。
+#!/usr/bin/env python3
+"""生成「图片-字幕」原始文稿 —— 本工作流的核心工件。
 
-做三件事：
-  1) 若 subs/kedou_NN.json（kedou_fetch.js 的输出）存在，导出 subs/pNN.srt / pNN.txt；
-  2) 对 frames/pNN/ 的 1fps 抽帧按「画面变化」切时间窗口（缩到 32x18 灰度做平均绝对差）；
-  3) 每个窗口保留一张代表帧，合并该窗口内的字幕，输出 transcripts/pNN.md（含可点击时间戳）。
+对每个分 P 做三件事：
+  1) 若 ``subs/kedou_NN.json``（subtitle_fetch.py 的输出）存在，先导出
+     ``subs/pNN.srt`` 与 ``subs/pNN.txt``；
+  2) 对 ``frames/pNN/`` 的 1fps 抽帧按「画面变化」切分时间窗口
+     （帧缩到 32x18 灰度，与窗口代表帧做平均绝对差）；
+  3) 每个窗口保留一张代表帧并合并窗口内字幕，输出 ``transcripts/pNN.md``
+     （Markdown 表格分栏，含可点击时间戳）。
+
+⚠️ 通顺化改写（dump_windows/apply_windows 循环）之后不要再运行本脚本，
+   否则会覆盖已改写的文稿。
 
 用法:
-  python build_transcript.py --workdir <dir> --bv BV1xxxx --title "视频标题" --parts 1,2,3 \
-      --diff 12 --minwin 5 --maxwin 25
+    python build_transcript.py --workdir <dir> --bv BV1xxxx --title "视频标题" \\
+        --parts 1,2,3 --diff 12 --minwin 5 --maxwin 25
 """
-import argparse, glob, json, os, re, shutil
+from __future__ import annotations
+
+import argparse
+import glob
+import json
+import os
+import re
+import shutil
+from dataclasses import dataclass
+
 import numpy as np
 from PIL import Image
 
+# 画面差异比较用的缩略图尺寸（宽 x 高）
+THUMBNAIL_SIZE = (32, 18)
+# 无字幕且短于该秒数的窗口直接丢弃（多为转场/空屏）
+MIN_KEPT_WINDOW_SEC = 3
 
-def export_srt_from_json(workdir, part):
-    """kedou_NN.json -> subs/pNN.srt + pNN.txt"""
-    p = f"p{part:02d}"
-    jpath_candidates = [
+
+@dataclass
+class WindowingOptions:
+    """时间窗口切分参数（经验值 --diff 12 --minwin 5 --maxwin 25 适合课堂幻灯片）。"""
+
+    diff_threshold: float  # 与当前代表帧的平均绝对差超过该值 → 视为画面变化
+    min_window_sec: int    # 距窗口起点不足该秒数时，即使画面变化也不切分
+    max_window_sec: int    # 同画面停留超过该秒数时强制切一刀
+
+
+@dataclass
+class Window:
+    """一个时间窗口：起点秒、代表帧路径。窗口终点由下一个窗口的起点决定。"""
+
+    start_sec: int
+    frame_path: str
+
+
+# ---------------------------------------------------------------- 字幕导出与解析
+def export_srt_from_kedou_json(workdir: str, part: int) -> None:
+    """把 kedou_NN.json 中的 SRT 文本导出为 subs/pNN.srt 与 subs/pNN.txt。
+
+    已存在 srt 时跳过（幂等）；json 缺失或内容为空时静默返回，由后续
+    流程报告「缺少字幕」。
+    """
+    part_name = f"p{part:02d}"
+    srt_path = os.path.join(workdir, "subs", part_name + ".srt")
+    if os.path.exists(srt_path):
+        return
+
+    json_candidates = [
         os.path.join(workdir, "subs", f"kedou_{part:02d}.json"),
         os.path.join(workdir, "subs", f"kedou_{part}.json"),
     ]
-    srt_path = os.path.join(workdir, "subs", p + ".srt")
-    if os.path.exists(srt_path):
-        return
-    for jp in jpath_candidates:
-        if not os.path.exists(jp):
+    for json_path in json_candidates:
+        if not os.path.exists(json_path):
             continue
         try:
-            j = json.load(open(jp, encoding="utf-8"))
-        except Exception:
+            with open(json_path, encoding="utf-8") as f:
+                payload = json.load(f)
+        except (json.JSONDecodeError, OSError):
             continue
-        items = (j.get("data") or {}).get("subtitleItemVoList") or []
-        if not items:
+        subtitle_items = (payload.get("data") or {}).get("subtitleItemVoList") or []
+        if not subtitle_items:
             continue
-        content = items[0].get("content", "")
+
+        srt_content = subtitle_items[0].get("content", "")
         os.makedirs(os.path.join(workdir, "subs"), exist_ok=True)
-        open(srt_path, "w", encoding="utf-8").write(content)
-        lines = []
-        for line in content.splitlines():
-            s = line.strip()
-            if not s or re.match(r"^\d+$", s) or "-->" in s:
+        with open(srt_path, "w", encoding="utf-8") as f:
+            f.write(srt_content)
+        # pNN.txt：去掉序号行与时间轴行，只留字幕文本，便于通顺化时参考
+        text_lines = []
+        for line in srt_content.splitlines():
+            stripped = line.strip()
+            if not stripped or re.fullmatch(r"\d+", stripped) or "-->" in stripped:
                 continue
-            lines.append(s)
-        open(os.path.join(workdir, "subs", p + ".txt"), "w", encoding="utf-8").write("\n".join(lines))
+            text_lines.append(stripped)
+        txt_path = os.path.join(workdir, "subs", part_name + ".txt")
+        with open(txt_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(text_lines))
         return
 
 
-def parse_srt(path):
-    subs = []
-    raw = open(path, encoding="utf-8").read()
-    for b in re.split(r"\n\s*\n", raw):
-        m = re.search(r"(\d+):(\d+):(\d+)[,.](\d+)\s*-->\s*(\d+):(\d+):(\d+)[,.](\d+)", b)
-        if not m:
+def parse_srt(srt_path: str) -> list[tuple[float, str]]:
+    """解析 SRT，返回按序的 (开始秒, 字幕文本) 列表（文本已去空白）。"""
+    with open(srt_path, encoding="utf-8") as f:
+        raw = f.read()
+
+    subtitles: list[tuple[float, str]] = []
+    time_pattern = re.compile(
+        r"(\d+):(\d+):(\d+)[,.](\d+)\s*-->\s*(\d+):(\d+):(\d+)[,.](\d+)"
+    )
+    for block in re.split(r"\n\s*\n", raw):
+        match = time_pattern.search(block)
+        if not match:
             continue
-        h, mm, s, ms, h2, mm2, s2, ms2 = map(int, m.groups())
-        start = h * 3600 + mm * 60 + s + ms / 1000.0
-        text = re.sub(r"\s+", "", b[m.end():].strip())
+        hours, minutes, seconds, millis = map(int, match.groups()[:4])
+        start_sec = hours * 3600 + minutes * 60 + seconds + millis / 1000.0
+        text = re.sub(r"\s+", "", block[match.end():].strip())
         if text:
-            subs.append((start, text))
-    return subs
+            subtitles.append((start_sec, text))
+    return subtitles
 
 
-def frame_low(path, size=(32, 18)):
-    return np.asarray(Image.open(path).convert("L").resize(size), dtype=np.float32)
+# ---------------------------------------------------------------- 画面窗口切分
+def load_grayscale_thumbnail(image_path: str) -> np.ndarray:
+    """读图并缩到 THUMBNAIL_SIZE 的灰度 float32 数组，用于快速比较。"""
+    image = Image.open(image_path).convert("L").resize(THUMBNAIL_SIZE)
+    return np.asarray(image, dtype=np.float32)
 
 
-def build(part, args):
-    p = f"p{part:02d}"
-    export_srt_from_json(args.workdir, part)
-    framefiles = sorted(glob.glob(os.path.join(args.workdir, "frames", p, "*.jpg")))
-    srt = os.path.join(args.workdir, "subs", p + ".srt")
-    if not framefiles or not os.path.exists(srt):
-        print(f"{p}: 缺少帧或字幕，跳过")
+def split_into_windows(frame_files: list[str], options: WindowingOptions) -> list[Window]:
+    """按画面变化把 1fps 帧序列切分为时间窗口。
+
+    规则：与当前窗口代表帧的平均绝对差 > diff_threshold 且距窗口起点
+    >= min_window_sec 时开新窗口；同一画面停留 >= max_window_sec 强制切分。
+    第 k 帧对应第 k 秒（帧号 = 秒数 + 1），故直接用下标作时间。
+    """
+    windows: list[Window] = []
+    representative: np.ndarray | None = None
+    window_start: int | None = None
+
+    for timestamp, frame_path in enumerate(frame_files):
+        thumbnail = load_grayscale_thumbnail(frame_path)
+        if representative is None:
+            representative, window_start = thumbnail, timestamp
+            windows.append(Window(start_sec=timestamp, frame_path=frame_path))
+            continue
+
+        diff = float(np.mean(np.abs(thumbnail - representative)))
+        start_new_window = diff > options.diff_threshold
+        # 画面刚切换时抖动较大：不足 min_window_sec 不切，避免碎窗口
+        if start_new_window and timestamp - window_start < options.min_window_sec:
+            start_new_window = False
+        # 同一张幻灯片停留太久：强制切一刀，保证窗口粒度可控
+        if timestamp - window_start >= options.max_window_sec:
+            start_new_window = True
+
+        if start_new_window:
+            representative, window_start = thumbnail, timestamp
+            windows.append(Window(start_sec=timestamp, frame_path=frame_path))
+
+    return windows
+
+
+# ---------------------------------------------------------------- 文稿生成
+def build_transcript(workdir: str, bv: str, title: str, part: int,
+                     options: WindowingOptions) -> None:
+    """为第 ``part`` 个分 P 生成 transcripts/pNN.md；缺帧或缺字幕时跳过。"""
+    part_name = f"p{part:02d}"
+    export_srt_from_kedou_json(workdir, part)
+
+    frame_files = sorted(glob.glob(os.path.join(workdir, "frames", part_name, "*.jpg")))
+    srt_path = os.path.join(workdir, "subs", part_name + ".srt")
+    if not frame_files or not os.path.exists(srt_path):
+        print(f"{part_name}: 缺少帧或字幕，跳过")
         return
-    subs = parse_srt(srt)
+    subtitles = parse_srt(srt_path)
 
-    windows, rep, win_start = [], None, None
-    for idx, f in enumerate(framefiles):
-        t = idx
-        low = frame_low(f)
-        if rep is None:
-            rep, win_start = low, t
-            windows.append([t, f])
-            continue
-        d = float(np.mean(np.abs(low - rep)))
-        newwin = d > args.diff
-        if newwin and (t - win_start) < args.minwin:
-            newwin = False
-        if (t - win_start) >= args.maxwin:
-            newwin = True
-        if newwin:
-            rep, win_start = low, t
-            windows.append([t, f])
+    windows = split_into_windows(frame_files, options)
+    # 每个窗口的终点 = 下一个窗口的起点；末尾用哨兵值表示视频结尾
+    window_ends = [w.start_sec for w in windows[1:]] + [10 ** 9]
 
-    starts = [w[0] for w in windows] + [10 ** 9]
-    imgdir_p = os.path.join(args.workdir, "transcripts", "img", p)
-    os.makedirs(imgdir_p, exist_ok=True)
-    lines = [f"# {args.title} · 第{part}讲 原始文稿（图-字幕分栏）", "",
-             "| 字幕文本 | 画面 |", "| :--- | ---: |", ""]
-    kept = 0
-    for i, (ws, f) in enumerate(windows):
-        we = starts[i + 1]
-        seg = "".join(s[1] for s in subs if ws <= s[0] < we)
-        if not seg and we - ws < 3:
-            continue
-        ts = f"{ws // 60:02d}:{ws % 60:02d}"
-        url = f"https://www.bilibili.com/video/{args.bv}/?p={part}&t={ws}"
-        fname = f"{ws:05d}.jpg"
-        shutil.copyfile(f, os.path.join(imgdir_p, fname))
-        kept += 1
-        text = (seg if seg else "（此区间无字幕）").strip().replace("|", "\\|")
-        lines.append(
-            f"| {text} [【跳转到 {ts}】]({url}) "
-            f"| <img src=\"img/{p}/{fname}\" width=\"9000\"> |"
+    image_dir = os.path.join(workdir, "transcripts", "img", part_name)
+    os.makedirs(image_dir, exist_ok=True)
+    lines = [
+        f"# {title} · 第{part}讲 原始文稿（图-字幕分栏）",
+        "",
+        "| 字幕文本 | 画面 |",
+        "| :--- | ---: |",
+        "",
+    ]
+
+    kept_count = 0
+    for window, window_end in zip(windows, window_ends):
+        # 合并落在 [window.start_sec, window_end) 内的所有字幕
+        segment = "".join(
+            text for start, text in subtitles if window.start_sec <= start < window_end
         )
-    out = os.path.join(args.workdir, "transcripts", p + ".md")
-    open(out, "w", encoding="utf-8").write("\n".join(lines))
-    print(f"{p}: frames={len(framefiles)} windows={len(windows)} kept={kept} -> {out}")
+        if not segment and window_end - window.start_sec < MIN_KEPT_WINDOW_SEC:
+            continue  # 无字幕且太短的窗口（转场/空屏）直接丢弃
+
+        timestamp_label = f"{window.start_sec // 60:02d}:{window.start_sec % 60:02d}"
+        jump_url = f"https://www.bilibili.com/video/{bv}/?p={part}&t={window.start_sec}"
+        image_name = f"{window.start_sec:05d}.jpg"
+        shutil.copyfile(window.frame_path, os.path.join(image_dir, image_name))
+        kept_count += 1
+
+        text = (segment if segment else "（此区间无字幕）").strip().replace("|", "\\|")
+        lines.append(
+            f"| {text} [【跳转到 {timestamp_label}】]({jump_url}) "
+            f"| <img src=\"img/{part_name}/{image_name}\" width=\"9000\"> |"
+        )
+
+    output_path = os.path.join(workdir, "transcripts", part_name + ".md")
+    with open(output_path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines))
+    print(f"{part_name}: frames={len(frame_files)} windows={len(windows)} "
+          f"kept={kept_count} -> {output_path}")
 
 
-def main():
-    ap = argparse.ArgumentParser()
-    ap.add_argument("--workdir", required=True)
-    ap.add_argument("--bv", required=True)
-    ap.add_argument("--title", required=True)
-    ap.add_argument("--parts", required=True)
-    ap.add_argument("--diff", type=float, default=12.0)
-    ap.add_argument("--minwin", type=int, default=5)
-    ap.add_argument("--maxwin", type=int, default=25)
-    args = ap.parse_args()
-    for part in [int(x) for x in args.parts.split(",")]:
-        build(part, args)
+# ---------------------------------------------------------------- CLI
+def parse_args() -> argparse.Namespace:
+    parser = argparse.ArgumentParser(description="生成「图片-字幕」原始文稿")
+    parser.add_argument("--workdir", required=True, help="工作目录")
+    parser.add_argument("--bv", required=True, help="视频 BV 号，如 BV1xxxx")
+    parser.add_argument("--title", required=True, help="视频标题（写入文稿一级标题）")
+    parser.add_argument("--parts", required=True, help="分 P 列表，如 1,2,3")
+    parser.add_argument("--diff", type=float, default=12.0,
+                        help="画面差异阈值（平均绝对差），默认 12")
+    parser.add_argument("--minwin", type=int, default=5,
+                        help="最短窗口秒数，默认 5")
+    parser.add_argument("--maxwin", type=int, default=25,
+                        help="最长窗口秒数（强制切分），默认 25")
+    return parser.parse_args()
+
+
+def main() -> None:
+    args = parse_args()
+    options = WindowingOptions(
+        diff_threshold=args.diff,
+        min_window_sec=args.minwin,
+        max_window_sec=args.maxwin,
+    )
+    for part in (int(x) for x in args.parts.split(",")):
+        build_transcript(args.workdir, args.bv, args.title, part, options)
 
 
 if __name__ == "__main__":
