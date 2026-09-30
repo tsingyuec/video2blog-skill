@@ -1,6 +1,6 @@
 # video2blog-skill
 
-[![skills.sh](https://skills.sh/b/try-agaaain/video2blog-skill)](https://skills.sh/try-agaaain/video2blog-skill)
+[![skills.sh](https://skills.sh/b/tsingyuec/video2blog-skill)](https://skills.sh/tsingyuec/video2blog-skill)
 ![Platform](https://img.shields.io/badge/platform-Bilibili%20%7C%20YouTube-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
@@ -29,7 +29,7 @@ pip install -r requirements.txt   # opencv-python、numpy、pillow、yt-dlp
 作为 Agent Skill 使用：把本仓库放入技能目录（如 Claude Code 的 `~/.claude/skills/video2blog/`），或通过 skills CLI 安装：
 
 ```bash
-npx skills add try-agaaain/video2blog-skill
+npx skills add tsingyuec/video2blog-skill
 ```
 
 ## 快速开始
