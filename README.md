@@ -38,6 +38,15 @@ npx skills add tsingyuec/video2blog-skill
 Use the skills in "https://github.com/tsingyuec/video2blog-skill" that are relevant to the current task. Run `npx skills add "https://github.com/tsingyuec/video2blog-skill"` and select the relevant skills, then follow their instructions.
 ```
 
+## 示例输出
+
+完整示例见 [`examples/`](examples/)——由本 skill 对视频《[电脑显卡GPU的工作原理，它是如何工作的？和CPU有什么区别？](https://www.bilibili.com/video/BV12FJtzRE6W/)》完整跑一遍得到：
+
+- [`blog.md`](examples/blog.md)：最终博客（金字塔结构 + 术语速查表 + 时间戳回链）
+- [`transcript.md`](examples/transcript.md)：第 4 步的原始文稿（图-字幕分栏，每行可回跳视频）
+
+> 示例配图托管在同仓库的 `media` 分支（`--depth 1` 安装不会下载），画面帧截取自上述 B 站视频，仅用于演示本 skill 的输出效果。
+
 ## 产物目录约定
 
 ```
@@ -66,6 +75,10 @@ scripts/
     ├─ subtitle_fetch.py          # Kedou 字幕抓取（纯标准库，AES/RSA 内置实现）
     ├─ build_transcript.py        # 分栏文稿生成（窗口去重 + 字幕合并 + 时间戳）
     └─ transcript_windows.py      # 文稿通顺化：窗口导出（dump）/ 写回（apply）
+examples/
+    ├─ README.md                  # 示例说明（blog.md + transcript.md；配图在 media 分支）
+    ├─ blog.md                    # 完整示例产出：最终博客
+    └─ transcript.md              # 完整示例产出：图-字幕原始文稿
 ```
 
 ## 致谢
