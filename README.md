@@ -4,19 +4,19 @@
 ![Platform](https://img.shields.io/badge/platform-Bilibili%20%7C%20YouTube-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-把视频（**B 站长课程 / 讲座**、**YouTube 视频**）整理成图文技术博客的**端到端 Agent Skill**。可作为一个 [Claude / 通用 Agent Skill](https://github.com/anthropics/skills) 使用，也可单独使用其中的脚本。
+把视频（**Bilibili / YouTube 视频**）整理成图文技术博客的**端到端 Agent Skill**。可作为 [Claude / 通用 Agent Skill](https://github.com/anthropics/skills) 使用，也可单独使用其中的脚本。
 
-**流程概览**：下载视频 → 1fps 抽帧并按画面变化去重 → 抓取平台 AI 字幕（Kedou 接口）→ 生成 `图-字幕` 原始文稿（带可点击时间戳）→ 逐窗口通顺化改写 → 按金字塔原理写成博客。
+**流程概览**：下载视频 → 1fps 抽帧并按画面变化去重 → 抓取平台 AI 字幕（Kedou 接口）→ 生成 `图-字幕` 原始文稿（带可点击时间戳）→ 逐窗口通顺化改写 → 按金字塔写作风格写成博客。
 
 > **核心理念**：博客必须建立在可核查的「原始文稿」之上，而不是凭空概括——每个知识点都能回跳到视频原片对应秒数。
 
 ## 特性
 
-- 🎞️ **智能抽帧去重**：1fps 抽帧后按画面变化切分时间窗口（32×18 灰度差分），课堂幻灯片类视频去重率约 95%，50 分钟视频 2975 帧只保留约 485 张代表帧
-- 📝 **可核查的原始文稿**：Markdown 分栏表格，左边幕文本、右边代表帧，每行带时间戳跳转链接（B 站 `?p=&t=` / YouTube `&t=`）
+- 🎞️ **智能抽帧去重**：1fps 抽帧后按画面变化切分时间窗口（32×18 灰度差分）去重以避免重复画面
+- 📝 **可核查的原始文稿**：Markdown 分栏表格，左边幕文本、右边代表帧，每行带时间戳跳转链接
 - 🌐 **多平台**：Bilibili（多 P 课程）与 YouTube（单视频）共用同一套流水线
 - 🔐 **零依赖字幕抓取**：Kedou 在线字幕服务的 RSA+AES 加密协议纯标准库实现（无需 pycryptodome）
-- ✍️ **内建写作规范**：金字塔原理 + SCQA 开篇 + "大一新生可懂"的术语解释（详见 `reference/blog-writing.md`）
+- ✍️ **内建写作规范**：金字塔写作风格 + SCQA 开篇 + "初学者可读"的术语解释（详见 `reference/blog-writing.md`）
 - 🔁 **通顺化工作流**：字幕逐句拼接往往不通顺，提供「按窗口导出 → 改写 → 写回」循环工具
 
 ## 安装
@@ -81,7 +81,7 @@ REWRITE
 SKILL.md                      # 技能主文件：完整工作流（任务速查表 + 5 步流程）
 requirements.txt              # Python 依赖清单
 reference/
-├─ blog-writing.md            # 金字塔原理 + 大一可懂写作规范（写博客前必读）
+├─ blog-writing.md            # 金字塔写作风格 + 初学者可读写作规范（写博客前必读）
 └─ kedou-api.md               # Kedou 字幕接口：加密原理与排查（字幕报错时读）
 scripts/
 ├─ download_video.py          # yt-dlp 封装：仅视频流下载，支持续传

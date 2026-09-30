@@ -1,6 +1,6 @@
 ---
 name: video2blog
-description: "把视频（B 站长课程/讲座、YouTube 视频）整理成图文技术博客的端到端流程：下载视频、每秒抽帧并按画面变化去重、抓取平台 AI 字幕（ Kedou 接口）、生成『图片-字幕』原始文稿（带可点击时间戳）、再按金字塔写作风格写成大一新生也能看懂的博客。只要用户提到把 B 站/YouTube 视频、BV 号、视频链接整理成博客、笔记、图文稿、逐字稿、学习笔记、视频转文字、视频配图总结——即使没有明确说『博客』——也要使用本技能。"
+description: "把视频（B 站长课程/讲座、YouTube 视频）整理成图文技术博客的端到端流程：下载视频、每秒抽帧并按画面变化去重、抓取平台 AI 字幕（ Kedou 接口）、生成『图片-字幕』原始文稿（带可点击时间戳）、再按金字塔写作风格写成初学者也能看懂的博客。只要用户提到把 B 站/YouTube 视频、BV 号、视频链接整理成博客、笔记、图文稿、逐字稿、学习笔记、视频转文字、视频配图总结——即使没有明确说『博客』——也要使用本技能。"
 ---
 
 # B 站/YouTube 视频 → 图文博客 工作流
@@ -152,7 +152,7 @@ REWRITE
 - ⚠️ 通顺化后**不要重跑**本脚本——它会覆盖已改写的文稿。
 - 常见 ASR 错拼在改写时顺手替换（清单见 `reference/blog-writing.md`）。
 
-## 第 5 步：写博客（金字塔原理 + 大一可懂）
+## 第 5 步：写博客（金字塔写作风格 + 初学者可读）
 
 对每个分 P，**基于第 4 步的原始文稿**写 `blog/blNN.md`。完整写作规范见 `reference/blog-writing.md`，要点：
 
@@ -183,5 +183,5 @@ REWRITE
 - `scripts/build_transcript.py` — 图-字幕原始文稿生成
 - `scripts/transcript_windows.py` — 文稿通顺化的"按窗口导出（dump）/写回（apply）"工具
 - `reference/kedou-api.md` — 字幕接口加密原理与维护（第 3 步报错时读）
-- `reference/blog-writing.md` — 金字塔原理 + 写作规范（写博客前必读）
+- `reference/blog-writing.md` — 金字塔写作风格 + 写作规范（写博客前必读）
 - `requirements.txt` — Python 依赖清单
