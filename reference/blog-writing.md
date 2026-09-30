@@ -102,9 +102,9 @@
 
 ```markdown
 [【跳转到 MM:SS】](https://www.bilibili.com/video/<BV>/?p=<分P>&t=<秒>)
-
-> `t` 为整数秒，`MM:SS` 由 `t` 换算，两者必须一致。
 ```
+其中 `t` 为整数秒，`MM:SS` 由 `t` 换算，两者必须一致。
+
 
 ## 6. 篇幅与覆盖
 
