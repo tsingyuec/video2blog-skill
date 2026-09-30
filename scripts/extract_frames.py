@@ -2,8 +2,8 @@
 """用 OpenCV 对视频按固定间隔抽帧（默认每秒 1 张）。
 
 产物与约定：
-  - 输出到 ``<workdir>/frames/<视频ID>/``，文件名 ``00001.jpg`` 对应第 0 秒，
-    即「帧号 = 秒数 + 1」，与 build_transcript.py 的时间对齐规则一致。
+  - 输出到 ``<workdir>/frames/<视频ID>/``，文件名 ``00000.jpg`` 对应第 0 秒，
+    即「编号 = 秒数」，与 build_transcript.py、transcripts/img 的命名一致。
   - 用 ``grab()`` 跳过不需要的帧、只对目标帧 ``retrieve()``，比逐帧解码快得多。
   - 若输出目录已有超过 10 张帧图，视为已完成，跳过（``--force`` 可强制重跑）。
 
@@ -17,6 +17,7 @@ from __future__ import annotations
 import argparse
 import glob
 import os
+import sys
 import time
 from dataclasses import dataclass
 
@@ -24,6 +25,13 @@ try:
     import cv2
 except ImportError:  # OpenCV 缺失时保留 import，让 main() 给出友好报错
     cv2 = None  # type: ignore[assignment]
+
+
+def _force_utf8_stdio() -> None:
+    """Windows/Git Bash（GBK）下把中文输出统一为 UTF-8，避免乱码。"""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
 
 
 @dataclass(frozen=True)
@@ -40,8 +48,8 @@ class ExtractOptions:
 def extract_frames(video_path: str, out_dir: str, options: ExtractOptions) -> int:
     """从单个视频抽帧，返回保存的帧数。
 
-    帧号与时间对齐：源视频按 ``source_fps`` 播放，每 ``step = source_fps / options.fps``
-    帧取一张，因此第 k 张保存的帧对应第 ``k / options.fps`` 秒（默认 1fps 时即帧号=秒数+1）。
+    编号与时间对齐：源视频按 ``source_fps`` 播放，每 ``step = source_fps / options.fps``
+    帧取一张，因此第 k 张保存的帧对应第 ``k / options.fps`` 秒（默认 1fps 时即文件名编号=秒数）。
     """
     capture = cv2.VideoCapture(video_path)
     if not capture.isOpened():
@@ -63,7 +71,7 @@ def extract_frames(video_path: str, out_dir: str, options: ExtractOptions) -> in
             if not ok:
                 break
             resized = _resize_if_needed(frame, options.width)
-            output_path = os.path.join(out_dir, f"{saved_count + 1:05d}.jpg")
+            output_path = os.path.join(out_dir, f"{saved_count:05d}.jpg")
             cv2.imwrite(
                 output_path,
                 resized,
@@ -120,6 +128,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    _force_utf8_stdio()
     if cv2 is None:
         raise SystemExit("缺少 OpenCV，请先安装：pip install opencv-python numpy")
     args = parse_args()

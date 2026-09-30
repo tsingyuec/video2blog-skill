@@ -1,4 +1,4 @@
 opencv-python>=4.8
-numpy
-pillow
-yt-dlp
+numpy>=1.21
+pillow>=9.0
+yt-dlp>=2023.1.1

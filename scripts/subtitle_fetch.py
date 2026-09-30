@@ -26,7 +26,15 @@ import base64
 import json
 import os
 import random
+import sys
 import urllib.request
+
+
+def _force_utf8_stdio() -> None:
+    """Windows/Git Bash（GBK）下把中文输出统一为 UTF-8，避免乱码。"""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
 
 # ---------------------------------------------------------------- 服务端常量
 AES_IV_B64 = "a2Vkb3VAODk4OSE2MzIzMw=="  # base64("kedou@8989!63233")，取前 16 字节作 IV
@@ -302,6 +310,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    _force_utf8_stdio()
     args = parse_args()
     subs_dir = os.path.join(args.workdir, "subs")
     os.makedirs(subs_dir, exist_ok=True)

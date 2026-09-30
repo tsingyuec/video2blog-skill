@@ -44,7 +44,7 @@ pip install -r requirements.txt   # opencv-python、numpy、pillow、yt-dlp
 ```
 <workdir>/
 ├─ videos/<视频ID>.mp4                   # 下载的视频（仅视频流）
-├─ frames/<视频ID>/  00001.jpg, …         # 1fps 抽帧（帧号 = 秒数+1）
+├─ frames/<视频ID>/  00000.jpg, …         # 1fps 抽帧（编号 = 秒数，00000 = 第 0 秒）
 ├─ subs/            <视频ID>.srt（+ kedou_<视频ID>.json）
 ├─ transcripts/<视频ID>.md                # ★ 字幕文稿（图-字幕对照）
 ├─ transcripts/img/<视频ID>/xxxxx.jpg     # 稿中保留的代表帧
@@ -78,7 +78,7 @@ python scripts/download_video.py --workdir "<workdir>" --platform youtube --bv <
 python scripts/extract_frames.py --workdir "<workdir>" --bv <BV>
 ```
 
-- 帧号 = 秒数 + 1（`00001.jpg` 对应第 0 秒），与第 4 步的时间对齐。
+- 编号 = 秒数（`00000.jpg` 对应第 0 秒），与第 4 步的时间对齐。
 - 默认缩放到宽 960、JPEG 质量 85；可用 `--width 0` 保留原始尺寸。
 - 速度取决于 CPU 解码，长视频会慢一些；`--force` 可强制重跑。
 
@@ -139,13 +139,14 @@ REWRITE
 ```
 
 - 每批 30–60 个窗口，导出一段、改写一段、写回一段。
-- Windows + Git Bash 终端默认 GBK：打印中文的 Python 命令要加 `PYTHONIOENCODING=utf-8`。
 - ⚠️ 通顺化后**不要重跑**本脚本——它会覆盖已改写的文稿。
 - 常见 ASR 错拼在改写时顺手替换（清单见 `reference/blog-writing.md`）。
 
 ## 第 5 步：写博客（金字塔写作风格 + 初学者可读）
 
-**基于第 4 步的原始文稿**写 `blog/blog.md`。写作风格与结构等全部细则——金字塔写作风格（结论先行、SCQA 开篇、MECE 分组、3–5 个要点一组、标题写判断句）、初学者可读的术语解释、配图/时间戳、完整覆盖要求——见 `reference/blog-writing.md`（写博客前必读）。
+**基于第 4 步的原始文稿**编写 `blog/blog.md`。写作风格与结构等全部细则——金字塔写作风格（结论先行、SCQA 开篇、MECE 分组、3–5 个要点一组、标题写判断句）、初学者可读的术语解释、配图/时间戳、完整覆盖要求——见 `reference/blog-writing.md`（写博客前必读）。
+
+配图挑选：从文稿代表帧里挑 8–16 张含文字/图表的幻灯片，剔除和小节内容无关的帧；思考选中的图是否能帮读者更好的理解内容，入选前逐张读图核对。
 
 > 长文任务建议：让子任务「**分段读取文稿、边写边追加**」，避免单次动作过大导致中断。
 

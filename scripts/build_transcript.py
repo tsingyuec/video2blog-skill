@@ -26,10 +26,18 @@ import json
 import os
 import re
 import shutil
+import sys
 from dataclasses import dataclass
 
 import numpy as np
 from PIL import Image
+
+
+def _force_utf8_stdio() -> None:
+    """Windows/Git Bash（GBK）下把中文输出统一为 UTF-8，避免乱码。"""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
 
 # 画面差异比较用的缩略图尺寸（宽 x 高）
 THUMBNAIL_SIZE = (32, 18)
@@ -137,7 +145,7 @@ def split_into_windows(frame_files: list[str], options: WindowingOptions) -> lis
 
     规则：与当前窗口代表帧的平均绝对差 > diff_threshold 且距窗口起点
     >= min_window_sec 时开新窗口；同一画面停留 >= max_window_sec 强制切分。
-    第 k 帧对应第 k 秒（帧号 = 秒数 + 1），故直接用下标作时间。
+    第 k 帧对应第 k 秒（帧文件名编号 = 秒数），故直接用下标作时间。
     """
     windows: list[Window] = []
     representative: np.ndarray | None = None
@@ -242,6 +250,7 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    _force_utf8_stdio()
     args = parse_args()
     options = WindowingOptions(
         diff_threshold=args.diff,

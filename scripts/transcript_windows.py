@@ -14,7 +14,7 @@
 文稿行格式约定（由 build_transcript.py 生成）：
     | 字幕文本 [【跳转到 MM:SS】](url) | <img src="img/<视频ID>/SSSSS.jpg" width="9000"> |
 
-其中 SSSSS = 窗口起点秒 + 1，既是图片文件名也是窗口号（5 位）。
+其中 SSSSS = 窗口起点秒，既是图片文件名也是窗口号（5 位，00000 = 第 0 秒）。
 """
 from __future__ import annotations
 
@@ -22,7 +22,7 @@ import argparse
 import re
 import sys
 
-# 右栏代表帧路径，如 img/BV1xx411c7mD/00754.jpg —— 帧号即窗口起点秒 + 1
+# 右栏代表帧路径，如 img/BV1xx411c7mD/00754.jpg —— 编号即窗口起点秒
 FRAME_REF_PATTERN = re.compile(r"img/[^/]+/(\d+)\.jpg")
 # 左栏文本与时间戳链接的分隔符（"[" 与 "【" 之间无空格）
 JUMP_LINK_PREFIX = " [【跳转到"
@@ -32,6 +32,13 @@ WINDOW_ID_PATTERN = re.compile(r"\d{5}")
 
 
 # ---------------------------------------------------------------- 共享：窗口行识别
+def _force_utf8_stdio() -> None:
+    """Windows/Git Bash（GBK）下把中文输出统一为 UTF-8，避免乱码。"""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+
+
 def _iter_window_rows(lines: list[str]):
     """依次产出 (行下标, 窗口号 5 位字符串)。只覆盖含时间戳链接的左栏行。
 
@@ -49,23 +56,31 @@ def _iter_window_rows(lines: list[str]):
 
 
 # ---------------------------------------------------------------- dump 子命令
-def dump_windows(transcript_path: str, start_sec: int, end_sec: int) -> int:
-    """把 ``[start_sec, end_sec)`` 区间的窗口行打印到 stdout，返回导出数。
+def dump_windows(transcript_path: str, start_sec: int, end_sec: int,
+                 output_path: str | None = None) -> int:
+    """把 ``[start_sec, end_sec)`` 区间的窗口行输出，返回导出数。
 
     每行输出 ``NNNNN|窗口文本``，NNNNN 即 apply 子命令所需的窗口号。
-    区间按窗口号（即帧号 = 起点秒 + 1）比较，与历史版本行为一致。
+    区间按窗口号（= 起点秒）比较，``start_sec``/``end_sec`` 单位都是秒（左闭右开）。
+    未指定 ``output_path`` 时写到 stdout。
     """
     exported = 0
     with open(transcript_path, encoding="utf-8") as f:
         lines = f.read().split("\n")
 
-    for _, window_id, line in ((i, w, lines[i]) for i, w in _iter_window_rows(lines)):
-        if not (start_sec <= int(window_id) < end_sec):
-            continue
-        # 去掉行首 "| " 与其后整段时间戳链接，只留字幕文本
-        text = line.split(JUMP_LINK_PREFIX)[0][2:]
-        print(f"{window_id}|{text}")
-        exported += 1
+    out = (open(output_path, "w", encoding="utf-8", newline="\n")
+           if output_path else sys.stdout)
+    try:
+        for _, window_id, line in ((i, w, lines[i]) for i, w in _iter_window_rows(lines)):
+            if not (start_sec <= int(window_id) < end_sec):
+                continue
+            # 去掉行首 "| " 与其后整段时间戳链接，只留字幕文本
+            text = line.split(JUMP_LINK_PREFIX)[0][2:]
+            print(f"{window_id}|{text}", file=out)
+            exported += 1
+    finally:
+        if output_path:
+            out.close()
     return exported
 
 
@@ -105,14 +120,19 @@ def read_window_rewrites(stdin_text: str) -> dict[str, str]:
     return mapping
 
 
-def apply_rewrites(transcript_path: str, mapping: dict[str, str]) -> int:
-    """把 mapping 中的新文本写回文稿左栏，返回成功替换的窗口数。
+def apply_rewrites(transcript_path: str, mapping: dict[str, str]
+                   ) -> tuple[int, list[str], int]:
+    """把 mapping 中的新文本写回文稿左栏。
 
     只替换左栏字幕文本；时间戳跳转链接与右栏 <img> 原样保留。
+    返回 ``(成功替换数, 未匹配的窗口号列表, 文稿窗口总数)``。未匹配指
+    mapping 里有、但文稿中找不到对应窗口行（通常是窗口号抄错或文件不符）。
     """
     with open(transcript_path, encoding="utf-8") as f:
         lines = f.read().split("\n")
 
+    window_ids = [window_id for _, window_id in _iter_window_rows(lines)]
+    window_id_set = set(window_ids)
     applied = 0
     for index, window_id in _iter_window_rows(lines):
         new_text = mapping.get(window_id)
@@ -123,7 +143,8 @@ def apply_rewrites(transcript_path: str, mapping: dict[str, str]) -> int:
 
     with open(transcript_path, "w", encoding="utf-8", newline="\n") as f:
         f.write("\n".join(lines))
-    return applied
+    unmatched = sorted(window_id for window_id in mapping if window_id not in window_id_set)
+    return applied, unmatched, len(window_ids)
 
 
 def _rewrite_row(line: str, new_text: str) -> str:
@@ -147,8 +168,10 @@ def parse_args() -> argparse.Namespace:
 
     dump_parser = subparsers.add_parser("dump", help="导出某时间区间的窗口文本")
     dump_parser.add_argument("transcript", help="文稿路径，如 transcripts/p08.md")
-    dump_parser.add_argument("start", type=int, help="起始秒（含）")
+    dump_parser.add_argument("start", type=int, help="起始秒（含，按窗口起点秒比较）")
     dump_parser.add_argument("end", type=int, help="结束秒（不含）")
+    dump_parser.add_argument("--out", help="写入文件（缺省打印到 stdout）")
+    dump_parser.add_argument("--quiet", action="store_true", help="不打印导出统计行")
 
     apply_parser = subparsers.add_parser(
         "apply", help="从 stdin 读 NNNNN|新文本 并写回文稿")
@@ -158,18 +181,23 @@ def parse_args() -> argparse.Namespace:
 
 
 def main() -> None:
+    _force_utf8_stdio()
     args = parse_args()
     if args.command == "dump":
-        count = dump_windows(args.transcript, args.start, args.end)
-        print(f"# 共导出 {count} 个窗口", file=sys.stderr)
+        count = dump_windows(args.transcript, args.start, args.end, args.out)
+        if not args.quiet:
+            print(f"# 共导出 {count} 个窗口", file=sys.stderr)
         return
 
     mapping = read_window_rewrites(_read_stdin_text())
     if not mapping:
         print("stdin 中没有解析到任何 'NNNNN|新文本' 行（注意 heredoc 要写结束分隔符）")
         raise SystemExit(1)
-    applied = apply_rewrites(args.transcript, mapping)
-    print(f"已写回 {applied}/{len(mapping)} 个窗口")
+    applied, unmatched, total = apply_rewrites(args.transcript, mapping)
+    message = f"已写回 {applied}/{len(mapping)} 个窗口（文稿共 {total} 个窗口）"
+    if unmatched:
+        message += f"；未匹配: {', '.join(unmatched)}"
+    print(message)
 
 
 if __name__ == "__main__":

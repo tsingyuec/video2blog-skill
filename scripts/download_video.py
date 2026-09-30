@@ -18,9 +18,18 @@
 from __future__ import annotations
 
 import argparse
+import glob
 import os
 import subprocess
 import sys
+
+
+def _force_utf8_stdio() -> None:
+    """Windows/Git Bash（GBK）下把中文输出统一为 UTF-8，避免乱码。"""
+    for stream in (sys.stdout, sys.stderr):
+        if hasattr(stream, "reconfigure"):
+            stream.reconfigure(encoding="utf-8")
+
 
 # 支持的平台：视频页 URL 模板
 PLATFORM_URLS = {
@@ -35,7 +44,7 @@ def build_download_cmd(platform: str, video_id: str, workdir: str, height: int) 
     # 优先该高度内的 avc1（H.264，OpenCV 兼容性最好）；没有则回退任意编码
     video_format = f"bv*[height<={height}][vcodec^=avc1]/bv*[height<={height}]"
     return [
-        sys.executable, "-m", "yt_dlp", "-q", "--no-warnings",
+        sys.executable, "-m", "yt_dlp", "--no-warnings", "--newline", "--progress",
         "-f", video_format,
         "-o", os.path.join(workdir, "videos", f"{video_id}.%(ext)s"),
         url,
@@ -55,11 +64,30 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def find_output(workdir: str, video_id: str) -> str | None:
+    """返回下载产物路径（忽略 .part 等临时文件），找不到则 None。"""
+    matches = [p for p in glob.glob(os.path.join(workdir, "videos", f"{video_id}.*"))
+               if not p.endswith(".part")]
+    return matches[0] if matches else None
+
+
 def main() -> None:
+    _force_utf8_stdio()
     args = parse_args()
     cmd = build_download_cmd(args.platform, args.bv, args.workdir, args.height)
     print(">", " ".join(cmd))
-    raise SystemExit(subprocess.call(cmd))
+    return_code = subprocess.call(cmd)
+    if return_code == 0:
+        output = find_output(args.workdir, args.bv)
+        if output:
+            size_mb = os.path.getsize(output) / (1024 * 1024)
+            print(f"下载完成: {output} ({size_mb:.1f} MB)")
+        else:
+            print("下载完成，但未找到输出文件（请检查 --bv 与 videos/ 目录）")
+    else:
+        print(f"下载失败（yt-dlp 退出码 {return_code}）；"
+              f"可尝试降分辨率 --height 720，或先删除 videos/*.part 后重试")
+    raise SystemExit(return_code)
 
 
 if __name__ == "__main__":

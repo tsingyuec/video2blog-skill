@@ -52,7 +52,7 @@ Use the skills in "https://github.com/tsingyuec/video2blog-skill" that are relev
 ```
 <workdir>/
 ├─ videos/        video1.mp4                 # 下载的视频（仅视频流）
-├─ frames/video1/    00001.jpg, 00002.jpg…   # 1fps 抽帧（帧号 = 秒数+1）
+├─ frames/video1/    00000.jpg, 00001.jpg…   # 1fps 抽帧（编号 = 秒数）
 ├─ subs/          video1.srt（+ kedou_<视频ID>.json）
 ├─ transcripts/video1.md                     # ★ 原始文稿（图-字幕对照）
 ├─ transcripts/img/video1/xxxxx.jpg          # 稿中保留的代表帧

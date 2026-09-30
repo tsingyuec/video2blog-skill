@@ -10,7 +10,7 @@
 
 **回答（中心思想）**：GPU 的核心思想是**"用更多的核心、更简单的计算单元，去并行处理海量且互不依赖的数据"**。它把算力堆在数量上，牺牲了灵活性，因此特别适合"令人尴尬的并行"任务——图形渲染、比特币挖矿、神经网络都是这一类。本文分两部分：先拆开显卡看它的**物理架构**，再理解它的**计算架构**，最后看看这两种架构如何匹配到挖矿和 AI 上。
 
-![一张显卡每秒约 36 万亿次计算，相当于 4400 个地球上所有人每秒各算一次](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/t00060.jpg)
+![一张显卡每秒约 36 万亿次计算，相当于 4400 个地球上所有人每秒各算一次](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00060.jpg)
 
 ---
 
@@ -22,7 +22,7 @@
 
 1 万个比 24 个多得多，所以你可能会认为 GPU 更强大。但真正的情况要复杂得多——核心数量只是故事的一部分。
 
-![GPU 与 CPU 的核心数量对比：GPU 上万核心 vs CPU 24 核心](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/t00126.jpg)
+![GPU 与 CPU 的核心数量对比：GPU 上万核心 vs CPU 24 核心](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00126.jpg)
 
 ### 1.2 一个有用的比喻：货船 vs 喷气机
 
@@ -35,7 +35,7 @@
 
 > **一边是"大量计算、执行较慢"，另一边是"少量计算、执行更快"——这就是吞吐量与延迟之间的权衡。** [【跳转到 02:37】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=157)
 
-![货船（GPU）与喷气机（CPU）：货仓容量 vs 速度与灵活性的取舍](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/t00147.jpg)
+![货船（GPU）与喷气机（CPU）：货仓容量 vs 速度与灵活性的取舍](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00147.jpg)
 
 ### 1.3 灵活性上的巨大差距
 
@@ -73,7 +73,7 @@
 - **散热系统**——因为功率会转化为热量，显卡的大部分重量都集中在散热器上；散热器用四根热管把 GPU 和显存的热量传导到散热片，再由风扇带走。
 - **接口**——一侧是连接显示器的各种端口，另一侧是 12V 电源接口，底部是连接到主板的 **PCIe** 针脚。[【跳转到 04:15】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=255)
 
-![显卡的组成：PCB 上的 GPU、显存、供电，以及 DisplayPort/HDMI 输出接口](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/t00573.jpg)
+![显卡的组成：PCB 上的 GPU、显存、供电，以及 DisplayPort/HDMI 输出接口](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00573.jpg)
 
 ### 2.2 GA102：GPU 芯片的层级结构
 
@@ -86,7 +86,7 @@
 
 把这些乘起来，整个 GPU 拥有：**10752 个 CUDA 核心、336 个张量核心和 84 个光线追踪核心**。[【跳转到 04:36】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=276)
 
-![GA102 的层级结构：GPC → SM → warp → CUDA/张量/光追核心](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/t00281.jpg)
+![GA102 的层级结构：GPC → SM → warp → CUDA/张量/光追核心](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00281.jpg)
 
 ### 2.3 三种核心，各司其职
 
@@ -100,7 +100,7 @@
 
 [【跳转到 05:13】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=313)
 
-![芯片中重复排列的 CUDA 核心、张量核心与光线追踪核心](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/t00308.jpg)
+![芯片中重复排列的 CUDA 核心、张量核心与光线追踪核心](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00308.jpg)
 
 ### 2.4 一个芯片，多个型号：良品率与"屏蔽"
 
@@ -119,7 +119,7 @@
 
 除了核心数，不同型号的最大时钟频率、显存数量与代数也不同。[【跳转到 06:16】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=376)
 
-![制造缺陷被隔离停用：Good 单元保留，Damaged 单元被停用](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/t00406.jpg)
+![制造缺陷被隔离停用：Good 单元保留，Damaged 单元被停用](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00406.jpg)
 
 ---
 
@@ -133,7 +133,7 @@
 
 这是显卡最常用的运算。核心还分成两半：一半使用 **32 位浮点数**（本质上是科学计数法）执行 FMA，另一半则处理 **32 位整数或浮点数**。核心的其他部分负责位移位、位掩码，以及收集和排队传入的指令与操作数，最后累加并输出结果。[【跳转到 07:30】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=450)
 
-![一个 CUDA 核心内部：FMA 运算单元与数据通路](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/t00465.jpg)
+![一个 CUDA 核心内部：FMA 运算单元与数据通路](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00465.jpg)
 
 ### 3.2 算力从哪来：核心数 × 频率 × 每周期运算
 
@@ -143,7 +143,7 @@
 - 3090 有 **10496 个核心**，主频约 **1.7GHz**；
 - 相乘就得到 **约 35.6 万亿次/秒** 的计算能力。[【跳转到 08:22】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=502)
 
-![算力 = 核心数 × 频率 × 每周期运算次数](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/t00512.jpg)
+![算力 = 核心数 × 频率 × 每周期运算次数](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00512.jpg)
 
 ### 3.3 特殊功能单元：处理除法、开方、三角函数
 
@@ -159,7 +159,7 @@
 
 由于核心每秒要持续执行数十万亿次计算，**GPU 是一台数据饥渴的机器**，需要持续不断的 TB 级数据输入。一旦"后勤"跟不上，再多的核心也会饿着。[【跳转到 10:23】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=623)
 
-![数据块在显存与 GPU 之间持续高速传输](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/t00658.jpg)
+![数据块在显存与 GPU 之间持续高速传输](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00658.jpg)
 
 ### 4.2 显存带宽：多台起重机同时装货
 
@@ -170,7 +170,7 @@
 
 作为对比，支持 CPU 的 **DRAM 内存条只有 64 位总线宽度**，最大带宽接近**每秒 64GB**——相差近一个数量级。这正是"货船式"吞吐量的来源。[【跳转到 11:08】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=668)
 
-![显存总线宽度与带宽对比 CPU 内存](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/t00673.jpg)
+![显存总线宽度与带宽对比 CPU 内存](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00673.jpg)
 
 ### 4.3 不止 0 和 1：PAM3 与 PAM4 编码
 
@@ -181,7 +181,7 @@
 
 行业后来一致同意：在新一代显存中改用 **PAM3**，因为这样可以**降低编码器复杂度、提高信噪比、提升能效**。[【跳转到 11:33】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=693)
 
-![二进制到三进制的转换：PAM3 把 3 bit 编成 2 个三进制数字](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/t00723.jpg)
+![二进制到三进制的转换：PAM3 把 3 bit 编成 2 个三进制数字](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00723.jpg)
 
 ---
 
@@ -199,7 +199,7 @@ GPU 处理这类问题用的是 **SIMD** 原理，即 **Single Instruction Multi
 
 这正是 GPU 高效的根本来源——一次发令，成千上万个数据同时被处理。[【跳转到 13:25】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=805)
 
-![SIMD：单指令多数据](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/t00810.jpg)
+![SIMD：单指令多数据](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00810.jpg)
 
 ### 5.3 一个例子：牛仔帽的顶点变换
 
@@ -213,7 +213,7 @@ GPU 处理这类问题用的是 **SIMD** 原理，即 **Single Instruction Multi
 
 最终，**5629 个物体、总共 830 万个顶点**被一次性变换到同一坐标系，相当于做了 **2500 万次加法**。整个过程的关键在于：**这数百万次计算中，每一次都不依赖任何其他计算**，所以可以随意分发到 GPU 的数千个核心上并行完成。[【跳转到 13:55】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=835)
 
-![牛仔帽顶点从模型空间变换到世界空间](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/t00845.jpg)
+![牛仔帽顶点从模型空间变换到世界空间](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/00845.jpg)
 
 > 小提醒：这只是相当复杂的图形渲染流水线的**第一步**，此外还省略了旋转和缩放变换——它们也是类似的、需要额外 SIMD 计算的过程。
 
@@ -232,7 +232,7 @@ GPU 处理这类问题用的是 **SIMD** 原理，即 **Single Instruction Multi
 
 所有这些都由 **GigaThread 引擎**统一管理或调度，它高效地把线程块映射到可用的 SM 上。[【跳转到 17:08】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=1028)
 
-![线程 → warp → 线程块 → 网格的层级，与 CUDA 核心/SM 对应](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/t01003.jpg)
+![线程 → warp → 线程块 → 网格的层级，与 CUDA 核心/SM 对应](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/01003.jpg)
 
 ### 6.2 SIMD 与 SIMT 的区别
 
@@ -246,7 +246,7 @@ GPU 处理这类问题用的是 **SIMD** 原理，即 **Single Instruction Multi
 
 这种改进让 GPU 在遇到 **warp 发散**（warp divergence）时，能更灵活地处理数据相关的条件分支，也更容易让线程重新收敛、达成屏障同步。**一句话：新架构在处理代码分支时更灵活、更高效。** [【跳转到 17:44】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=1064)
 
-![SIMT（单指令多线程）：从数据输入到结果输出](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/t01064.jpg)
+![SIMT（单指令多线程）：从数据输入到结果输出](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/01064.jpg)
 
 ### 6.3 冷知识：warp 一词的来历
 
@@ -262,7 +262,7 @@ GPU 处理这类问题用的是 **SIMD** 原理，即 **Single Instruction Multi
 
 可以把这想象成一台彩票生成器：你无法直接选择号码，但算法会根据输入数据生成一个随机号码。**改变 nonce，其他数据不变，就能得到一个全新的彩票号码。** [【跳转到 19:31】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=1171)
 
-![SHA-256 哈希机：输入交易数据与 nonce，输出一张随机"彩票"](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/t01186.jpg)
+![SHA-256 哈希机：输入交易数据与 nonce，输出一张随机"彩票"](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/01186.jpg)
 
 ### 7.2 为什么显卡适合挖矿
 
@@ -276,7 +276,7 @@ GPU 处理这类问题用的是 **SIMD** 原理，即 **Single Instruction Multi
 
 不过今天的情况已经变了。装满 **ASIC（专用集成电路）** 的矿机每秒可以执行 **250 万亿次哈希运算，相当于约 2600 张显卡**。所以在真正的挖矿现场，显卡在一台 ASIC 矿机旁边**看起来就像一把勺子**——专用硬件的效率是通用显卡无法企及的。[【跳转到 20:58】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=1258)
 
-![在 ASIC 矿机旁，显卡就像一把勺子](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/t01273.jpg)
+![在 ASIC 矿机旁，显卡就像一把勺子](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/01273.jpg)
 
 ---
 
@@ -290,13 +290,13 @@ GPU 处理这类问题用的是 **SIMD** 原理，即 **Single Instruction Multi
 
 以输出的一个值为例：它等于**第一个矩阵第一行**与**第二个矩阵第一列**对应元素相乘之和，再加上**第三个矩阵的相应值**。由于三个输入矩阵的所有值都同时准备好，张量核心可以**同时完成所有矩阵乘加运算**——这就是它比一个 CUDA 核心快得多的原因。[【跳转到 21:23】](https://www.bilibili.com/video/BV12FJtzRE6W/?t=1283)
 
-![张量核心的矩阵乘加：A×B + C = D](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/t01304.jpg)
+![张量核心的矩阵乘加：A×B + C = D](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/01304.jpg)
 
 ### 8.2 为什么 AI 需要它
 
 神经网络和生成式人工智能需要**数万亿到数千万亿次**矩阵乘法与加法运算，而且通常使用**更大的矩阵**。矩阵乘加天然是"可以同时进行"的海量重复运算，正好命中 GPU 最擅长的领域。这也是为什么用于游戏的显卡，会成为训练和运行 AI 模型的主力硬件。
 
-![矩阵乘加的计算细节：第一个矩阵的行与第二个矩阵的列对应相乘再求和](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/t01216.jpg)
+![矩阵乘加的计算细节：第一个矩阵的行与第二个矩阵的列对应相乘再求和](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/assets/01216.jpg)
 
 ---
 
