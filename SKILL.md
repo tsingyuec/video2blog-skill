@@ -124,7 +124,7 @@ python scripts/build_transcript.py --workdir "<workdir>" --platform youtube \
 ```markdown
 | 字幕文本 | 画面 |
 | :--- | ---: |
-| 该时间窗口内所有字幕合并后的文本…… [【跳转到 12:34】](https://www.bilibili.com/video/<BV>/?p=3&t=754) | <img src="img/p03/00754.jpg" width="9000"> |
+| 该时间窗口内所有字幕合并后的文本…… [【跳转到 12:34】](https://www.bilibili.com/video/<BV>/?t=754) | <img src="img/p01/00754.jpg" width="9000"> |
 ```
 
   无字幕窗口左栏写「（此区间无字幕）」；右栏内联 `<img width="9000">`（MD 表格无法指定列宽，用图片 width 撑大右栏，链接保持可点）。
@@ -133,10 +133,10 @@ python scripts/build_transcript.py --workdir "<workdir>" --platform youtube \
 
 ```bash
 # 导出某区间窗口：输出每行形如 01202|窗口文本
-python scripts/transcript_windows.py dump transcripts/p08.md 1202 1700
+python scripts/transcript_windows.py dump transcripts/p01.md 1202 1700
 
 # 把改写后的 NNNNN|新文本 用 heredoc 写回（⚠️ heredoc 必须写结束分隔符）
-python scripts/transcript_windows.py apply transcripts/p08.md << 'REWRITE'
+python scripts/transcript_windows.py apply transcripts/p01.md << 'REWRITE'
 01202|改写后的文本……
 01222|改写后的文本……
 REWRITE
