@@ -12,12 +12,11 @@
 
 ## 特性
 
-- 🎞️ **智能抽帧去重**：1fps 抽帧后按画面变化切分时间窗口（32×18 灰度差分）去重以避免重复画面
-- 📝 **可核查的原始文稿**：Markdown 分栏表格，左边幕文本、右边代表帧，每行带时间戳跳转链接
-- 🌐 **多平台**：Bilibili 与 YouTube 共用同一套单视频流水线；多个视频重复执行即可
-- 🔐 **零依赖字幕抓取**：Kedou 在线字幕服务的 RSA+AES 加密协议纯标准库实现（无需 pycryptodome）
-- ✍️ **内建写作规范**：金字塔写作风格 + SCQA 开篇 + "初学者可读"的术语解释（详见 `reference/blog-writing.md`）
-- 🔁 **通顺化工作流**：字幕逐句拼接往往不通顺，提供「按窗口导出 → 改写 → 写回」循环工具
+- **自动化流程**：输入视频链接后，下载、抽帧、抓字幕、生成图文文稿、写博客依次完成，长视频无需从头观看。
+- **内容可回溯**：博客基于视频原始字幕与幻灯片撰写，正文时间戳可跳回原片对应位置进行回看。
+- **金字塔写作**：结论先行、SCQA 开篇，术语首次出现时解释，标题写成观点句。
+- **关键帧去重**：同一画面无论停留多久只保留一张代表帧，文稿中不会堆叠重复截图。
+- **多平台支持**：B 站与 YouTube 通用；字幕直接读取平台 AI 字幕，抓取逻辑用标准库实现，无第三方依赖。
 
 ## 手动安装
 
@@ -40,7 +39,7 @@ Use the skills in "https://github.com/tsingyuec/video2blog-skill" that are relev
 
 ## 示例输出
 
-由本 skill 对《[Stanford CS336 第 7 讲 · 并行训练](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7)》完整跑一遍得到：
+采用本 skill 对《[Stanford CS336 第 7 讲 · 并行训练](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7)》完整跑一遍得到：
 
 ![示例：图-字幕原始文稿（左字幕、右代表帧，可点击时间戳）](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/docs/example.png)
 
