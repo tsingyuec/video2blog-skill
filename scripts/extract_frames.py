@@ -10,7 +10,7 @@
 依赖：``pip install opencv-python numpy``
 
 用法:
-    python extract_frames.py --workdir <dir> --bv BV1xxxx [--fps 1] [--width 960] [--quality 85]
+    python extract_frames.py --workdir <dir> --bv BV1xxxx [--fps 1] [--width 0] [--quality 100]
 """
 from __future__ import annotations
 
@@ -40,8 +40,8 @@ class ExtractOptions:
 
     workdir: str
     fps: float = 1.0
-    width: int = 960   # 缩放宽度；0 表示保留原始尺寸
-    quality: int = 85  # JPEG 质量 0-100
+    width: int = 0     # 缩放宽度；0 表示保留原始尺寸（默认不缩放）
+    quality: int = 100  # JPEG 质量 0-100
     force: bool = False
 
 
@@ -121,8 +121,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--bv", required=True,
                         help="视频 ID：B 站为 BV 号，YouTube 为 11 位视频 ID")
     parser.add_argument("--fps", type=float, default=1, help="抽帧频率（帧/秒），默认 1")
-    parser.add_argument("--width", type=int, default=960, help="缩放宽度，0 表示原始尺寸")
-    parser.add_argument("--quality", type=int, default=85, help="JPEG 质量 0-100，越大越清晰")
+    parser.add_argument("--width", type=int, default=0,
+                        help="缩放宽度，0 表示保留原始尺寸（默认）")
+    parser.add_argument("--quality", type=int, default=100,
+                        help="JPEG 质量 0-100，默认 100（不额外压缩画质）")
     parser.add_argument("--force", action="store_true", help="忽略已有帧，强制重跑")
     return parser.parse_args()
 

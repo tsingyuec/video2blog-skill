@@ -79,7 +79,7 @@ python scripts/extract_frames.py --workdir "<workdir>" --bv <BV>
 ```
 
 - 编号 = 秒数（`00000.jpg` 对应第 0 秒），与第 4 步的时间对齐。
-- 默认缩放到宽 960、JPEG 质量 85；可用 `--width 0` 保留原始尺寸。
+- 默认保留原始分辨率、JPEG 质量 100（不额外压缩画质）；体积过大时可用 `--width 960` 等比缩到宽 960，或调低 `--quality`。
 - 速度取决于 CPU 解码，长视频会慢一些；`--force` 可强制重跑。
 
 ## 第 3 步：抓取字幕（在线服务 Kedou）
