@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """分栏文稿窗口文本的「导出 ↔ 写回」工具 —— 文稿通顺化循环的两端。
 
-与 transcripts/<视频ID>.md（Markdown 表格分栏版）配合使用：
+与 transcripts/<视频标题>.md（Markdown 表格分栏版）配合使用：
 
     # 1) 导出某时间区间的窗口文本，每行形如 01202|窗口原文
     python transcript_windows.py dump transcripts/p08.md 1202 1700

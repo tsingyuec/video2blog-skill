@@ -46,10 +46,10 @@ pip install -r requirements.txt   # opencv-python、numpy、pillow、yt-dlp
 ├─ videos/<视频ID>.mp4                   # 下载的视频（仅视频流）
 ├─ frames/<视频ID>/  00000.jpg, …         # 1fps 抽帧（编号 = 秒数，00000 = 第 0 秒）
 ├─ subs/            <视频ID>.srt（+ kedou_<视频ID>.json）
-├─ transcripts/<视频ID>.md                # ★ 视频演说图文稿（图-字幕对照）
+├─ transcripts/<视频标题>.md              # ★ 视频演说图文稿（图-字幕对照）
 ├─ transcripts/img/<视频ID>/xxxxx.jpg     # 稿中保留的代表帧
 └─ blog/
-   ├─ blog.md                             # ★ 本视频的博客
+   ├─ <视频标题>.md                        # ★ 本视频的博客
    └─ assets/                             # 博客配图
 ```
 
@@ -112,7 +112,7 @@ python scripts/build_transcript.py --workdir "<workdir>" --platform youtube \
   --bv <视频ID> --title "<视频标题>"
 ```
 
-- 脚本会先把字幕 json（`subs/kedou_<视频ID>.json`）导出为 `subs/<视频ID>.srt`，再生成 `transcripts/<视频ID>.md`（代表帧复制到 `transcripts/img/<视频ID>/`）。时间戳跳转链接按平台自动生成：B 站 `?t=秒`，YouTube `&t=秒`。
+- 脚本会先把字幕 json（`subs/kedou_<视频ID>.json`）导出为 `subs/<视频ID>.srt`，再生成 `transcripts/<视频标题>.md`（跨平台通用；标题里的非法文件名字符会自动替换、过长会截断；代表帧复制到 `transcripts/img/<视频ID>/`）。时间戳跳转链接按平台自动生成：B 站 `?t=秒`，YouTube `&t=秒`。
 - **判据**：帧缩到 32×18 灰度做平均绝对差；与当前窗口代表帧差异 `> --diff` 且距窗口起点 `≥ --minwin` 秒 → 开新窗口；同画面最长停留 `--maxwin` 秒强制切一刀。
 - **参数经验**：`--diff 12 --minwin 5 --maxwin 25` 对课堂幻灯片约 95% 去重率。画面切换剧烈就调大 `--diff`，想更细就调小。
 - 输出为 MD 表格分栏格式（左字右图），每行一个窗口，形如：
@@ -129,10 +129,10 @@ python scripts/build_transcript.py --workdir "<workdir>" --platform youtube \
 
 ```bash
 # 导出某区间窗口：输出每行形如 01202|窗口文本
-python scripts/transcript_windows.py dump transcripts/<视频ID>.md 1202 1700
+python scripts/transcript_windows.py dump "transcripts/<视频标题>.md" 1202 1700
 
 # 把改写后的 NNNNN|新文本 用 heredoc 写回（⚠️ heredoc 必须写结束分隔符）
-python scripts/transcript_windows.py apply transcripts/<视频ID>.md << 'REWRITE'
+python scripts/transcript_windows.py apply "transcripts/<视频标题>.md" << 'REWRITE'
 01202|改写后的文本……
 01222|改写后的文本……
 REWRITE
@@ -144,9 +144,11 @@ REWRITE
 
 ## 第 5 步：写博客（金字塔写作风格 + 初学者可读）
 
-**基于第 4 步的视频演说图文稿**编写 `blog/blog.md`。写作风格与结构等全部细则——金字塔写作风格（结论先行、SCQA 开篇、MECE 分组、3–5 个要点一组、标题写判断句）、初学者可读的术语解释、配图/时间戳、完整覆盖要求——见 `reference/blog-writing.md`（写博客前必读）。
+**基于第 4 步的视频演说图文稿**编写 `blog/<视频标题>.md`。写作风格与结构等全部细则——金字塔写作风格（结论先行、SCQA 开篇、MECE 分组、3–5 个要点一组、标题写判断句）、初学者可读的术语解释、配图/时间戳、完整覆盖要求——见 `reference/blog-writing.md`（写博客前必读）。
 
 配图挑选：从文稿代表帧里挑选 8–16 张图片放入博客中，注意不要选择和小节内容关联较弱的帧；思考选中的图是否能帮读者更好的理解小节内容，入选前逐张读图核对。
+
+篇幅核对（写完必做）：统计博客字数，判断是否与视频时长、文稿信息量相匹配；避免遗漏内容或过度概括。
 
 > 长文任务建议：让子任务「**分段读取文稿、边写边追加**」，避免单次动作过大导致中断。
 

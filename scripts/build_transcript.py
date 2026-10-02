@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """生成「图片-字幕」原始文稿 —— 本工作流的核心工件。
 
-处理**单个视频**（产物以 ``--bv`` 视频 ID 命名，多视频共用 workdir 时靠它区分）：
+处理**单个视频**（产物以 ``--title`` 视频标题命名，多视频共用 workdir 时靠它区分）：
   1) 若 ``subs/kedou_<视频ID>.json``（subtitle_fetch.py 的输出）存在，先导出
      ``subs/<视频ID>.srt`` 与 ``subs/<视频ID>.txt``；
   2) 对 ``frames/<视频ID>/`` 的 1fps 抽帧按「画面变化」切分时间窗口
      （帧缩到 32x18 灰度，与窗口代表帧做平均绝对差）；
-  3) 每个窗口保留一张代表帧并合并窗口内字幕，输出 ``transcripts/<视频ID>.md``
-     （Markdown 表格分栏，含可点击时间戳，代表帧复制到 ``transcripts/img/<视频ID>/``）。
+  3) 每个窗口保留一张代表帧并合并窗口内字幕，输出 ``transcripts/<视频标题>.md``
+     （Markdown 表格分栏，含可点击时间戳，代表帧复制到 ``transcripts/img/<视频ID>/``）；
+     标题中的非法文件名字符会被替换，过长会截断。
 
 ⚠️ 通顺化改写（transcript_windows.py 的 dump/apply 循环）之后不要再运行本脚本，
    否则会覆盖已改写的文稿。
@@ -68,6 +69,27 @@ class Window:
 
     start_sec: int
     frame_path: str
+
+
+# Windows 文件名非法字符 -> 视觉相近的全角字符（尽量保留标题可读性）
+_FILENAME_REPLACEMENTS = {
+    ":": "：", "?": "？", "*": "＊", '"': "＂",
+    "<": "＜", ">": "＞", "|": "｜", "/": "／", "\\": "＼",
+}
+
+
+def filename_from_title(title: str, fallback: str, max_length: int = 80) -> str:
+    """把视频标题转成安全的文件名（不含扩展名）。
+
+    替换 Windows 非法字符、去掉控制字符、压缩空白并限长；结果为空时回退到 fallback。
+    """
+    name = re.sub(r"[\x00-\x1f]", "", title)
+    for bad, good in _FILENAME_REPLACEMENTS.items():
+        name = name.replace(bad, good)
+    name = re.sub(r"\s+", " ", name).strip().rstrip(".")
+    if len(name) > max_length:
+        name = name[:max_length].rstrip().rstrip(".")
+    return name or fallback
 
 
 # ---------------------------------------------------------------- 字幕导出与解析
@@ -177,9 +199,10 @@ def split_into_windows(frame_files: list[str], options: WindowingOptions) -> lis
 # ---------------------------------------------------------------- 文稿生成
 def build_transcript(workdir: str, video_id: str, title: str,
                      options: WindowingOptions, platform: str = "bilibili") -> None:
-    """生成 transcripts/<视频ID>.md；缺帧或缺字幕时跳过。
+    """生成 transcripts/<视频标题>.md；缺帧或缺字幕时跳过。
 
-    video_id 即 --bv，用于定位产物与生成时间戳跳转链接。
+    video_id 即 --bv，用于定位 subs/frames 并生成时间戳跳转链接；
+    输出文件名取自 --title（非法字符会被替换）。
     """
     export_srt_from_kedou_json(workdir, video_id)
 
@@ -224,7 +247,8 @@ def build_transcript(workdir: str, video_id: str, title: str,
             f"| <img src=\"img/{video_id}/{image_name}\" width=\"9000\"> |"
         )
 
-    output_path = os.path.join(workdir, "transcripts", video_id + ".md")
+    output_path = os.path.join(workdir, "transcripts",
+                               filename_from_title(title, video_id) + ".md")
     with open(output_path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines))
     print(f"{video_id}: frames={len(frame_files)} windows={len(windows)} "
