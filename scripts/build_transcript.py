@@ -44,6 +44,8 @@ def _force_utf8_stdio() -> None:
 THUMBNAIL_SIZE = (32, 18)
 # 无字幕且短于该秒数的窗口直接丢弃（多为转场/空屏）
 MIN_KEPT_WINDOW_SEC = 3
+# 抽帧可能使用的图像扩展名（extract_frames.py 默认 webp，保留对旧产物的兼容）
+FRAME_EXTENSIONS = (".jpg", ".jpeg", ".png", ".webp")
 
 # 时间戳跳转链接构造规则：video_id 用 kedou 响应的 data.vid ——
 # B 站形如 BV1xx411c7mD_1（自带分 P 后缀），YouTube 即 11 位视频 ID；
@@ -206,7 +208,11 @@ def build_transcript(workdir: str, video_id: str, title: str,
     """
     export_srt_from_kedou_json(workdir, video_id)
 
-    frame_files = sorted(glob.glob(os.path.join(workdir, "frames", video_id, "*.jpg")))
+    frame_dir = os.path.join(workdir, "frames", video_id)
+    frame_files = sorted(
+        path for path in glob.glob(os.path.join(frame_dir, "*"))
+        if os.path.splitext(path)[1].lower() in FRAME_EXTENSIONS
+    )
     srt_path = os.path.join(workdir, "subs", video_id + ".srt")
     if not frame_files or not os.path.exists(srt_path):
         print(f"{video_id}: 缺少帧或字幕，跳过")
@@ -237,7 +243,8 @@ def build_transcript(workdir: str, video_id: str, title: str,
 
         timestamp_label = f"{window.start_sec // 60:02d}:{window.start_sec % 60:02d}"
         jump_url = JUMP_URL_BUILDERS[platform](video_id, window.start_sec)
-        image_name = f"{window.start_sec:05d}.jpg"
+        frame_ext = os.path.splitext(window.frame_path)[1].lower()
+        image_name = f"{window.start_sec:05d}{frame_ext}"
         shutil.copyfile(window.frame_path, os.path.join(image_dir, image_name))
         kept_count += 1
 

@@ -2,7 +2,7 @@
 """用 OpenCV 对视频按固定间隔抽帧（默认每秒 1 张）。
 
 产物与约定：
-  - 输出到 ``<workdir>/frames/<视频ID>/``，文件名 ``00000.jpg`` 对应第 0 秒，
+  - 输出到 ``<workdir>/frames/<视频ID>/``，默认 WebP，文件名 ``00000.webp`` 对应第 0 秒，
     即「编号 = 秒数」，与 build_transcript.py、transcripts/img 的命名一致。
   - 用 ``grab()`` 跳过不需要的帧、只对目标帧 ``retrieve()``，比逐帧解码快得多。
   - 若输出目录已有超过 10 张帧图，视为已完成，跳过（``--force`` 可强制重跑）。
@@ -10,7 +10,7 @@
 依赖：``pip install opencv-python numpy``
 
 用法:
-    python extract_frames.py --workdir <dir> --bv BV1xxxx [--fps 1] [--width 0] [--quality 100]
+    python extract_frames.py --workdir <dir> --bv BV1xxxx [--fps 1] [--width 0] [--format webp] [--quality 100]
 """
 from __future__ import annotations
 
@@ -41,8 +41,22 @@ class ExtractOptions:
     workdir: str
     fps: float = 1.0
     width: int = 0     # 缩放宽度；0 表示保留原始尺寸（默认不缩放）
-    quality: int = 100  # JPEG 质量 0-100
+    image_format: str = "webp"  # 图像格式：webp / jpg / png
+    quality: int = 100  # 有损格式质量 0-100（webp 设 >100 可无损）
     force: bool = False
+
+
+def _extension(image_format: str) -> str:
+    return "." + image_format
+
+
+def _imwrite_params(image_format: str, quality: int) -> list[int]:
+    """按格式返回 cv2.imwrite 的编码参数。"""
+    if image_format == "webp":
+        return [int(cv2.IMWRITE_WEBP_QUALITY), quality]
+    if image_format == "jpg":
+        return [int(cv2.IMWRITE_JPEG_QUALITY), quality]
+    return []  # png：无损，忽略 quality
 
 
 def extract_frames(video_path: str, out_dir: str, options: ExtractOptions) -> int:
@@ -71,11 +85,12 @@ def extract_frames(video_path: str, out_dir: str, options: ExtractOptions) -> in
             if not ok:
                 break
             resized = _resize_if_needed(frame, options.width)
-            output_path = os.path.join(out_dir, f"{saved_count:05d}.jpg")
+            output_path = os.path.join(
+                out_dir, f"{saved_count:05d}{_extension(options.image_format)}")
             cv2.imwrite(
                 output_path,
                 resized,
-                [int(cv2.IMWRITE_JPEG_QUALITY), options.quality],
+                _imwrite_params(options.image_format, options.quality),
             )
             saved_count += 1
         frame_index += 1
@@ -106,7 +121,7 @@ def extract_frames_for_video(options: ExtractOptions, video_id: str) -> None:
     os.makedirs(out_dir, exist_ok=True)
 
     # 已抽过帧就跳过，避免长视频重复跑几分钟
-    existing_frames = glob.glob(os.path.join(out_dir, "*.jpg"))
+    existing_frames = glob.glob(os.path.join(out_dir, "*" + _extension(options.image_format)))
     if len(existing_frames) > 10 and not options.force:
         print(f"已存在（{len(existing_frames)} 帧），跳过；--force 可强制重跑")
         return
@@ -123,8 +138,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--fps", type=float, default=1, help="抽帧频率（帧/秒），默认 1")
     parser.add_argument("--width", type=int, default=0,
                         help="缩放宽度，0 表示保留原始尺寸（默认）")
+    parser.add_argument("--format", dest="image_format", default="webp",
+                        choices=["webp", "jpg", "png"], help="图像格式，默认 webp")
     parser.add_argument("--quality", type=int, default=100,
-                        help="JPEG 质量 0-100，默认 100（不额外压缩画质）")
+                        help="有损格式质量 0-100，默认 100（webp 设 >100 可无损）")
     parser.add_argument("--force", action="store_true", help="忽略已有帧，强制重跑")
     return parser.parse_args()
 
@@ -138,6 +155,7 @@ def main() -> None:
         workdir=args.workdir,
         fps=args.fps,
         width=args.width,
+        image_format=args.image_format,
         quality=args.quality,
         force=args.force,
     )

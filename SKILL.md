@@ -44,10 +44,10 @@ pip install -r requirements.txt   # opencv-python、numpy、pillow、yt-dlp
 ```
 <workdir>/
 ├─ videos/<视频ID>.mp4                   # 下载的视频（仅视频流）
-├─ frames/<视频ID>/  00000.jpg, …         # 1fps 抽帧（编号 = 秒数，00000 = 第 0 秒）
+├─ frames/<视频ID>/  00000.webp, …        # 1fps 抽帧（默认 WebP；编号 = 秒数，00000 = 第 0 秒）
 ├─ subs/            <视频ID>.srt（+ kedou_<视频ID>.json）
 ├─ transcripts/<视频标题>.md              # ★ 视频演说图文稿（图-字幕对照）
-├─ transcripts/img/<视频ID>/xxxxx.jpg     # 稿中保留的代表帧
+├─ transcripts/img/<视频ID>/xxxxx.webp    # 稿中保留的代表帧
 └─ blog/
    ├─ <视频标题>.md                        # ★ 本视频的博客
    └─ assets/                             # 博客配图
@@ -78,8 +78,8 @@ python scripts/download_video.py --workdir "<workdir>" --platform youtube --bv <
 python scripts/extract_frames.py --workdir "<workdir>" --bv <BV>
 ```
 
-- 编号 = 秒数（`00000.jpg` 对应第 0 秒），与第 4 步的时间对齐。
-- 默认保留原始分辨率、JPEG 质量 100（不额外压缩画质）；体积过大时可用 `--width 960` 等比缩到宽 960，或调低 `--quality`。
+- 编号 = 秒数（`00000.webp` 对应第 0 秒），与第 4 步的时间对齐。
+- 默认输出 WebP、保留原始分辨率、质量 100（不额外压缩画质）；体积过大时可用 `--width 960` 等比缩到宽 960，或调低 `--quality`（`--format jpg` 可换回 JPEG）。
 - 速度取决于 CPU 解码，长视频会慢一些；`--force` 可强制重跑。
 
 ## 第 3 步：抓取字幕（在线服务 Kedou）
@@ -120,7 +120,7 @@ python scripts/build_transcript.py --workdir "<workdir>" --platform youtube \
 ```markdown
 | 字幕文本 | 画面 |
 | :--- | ---: |
-| 该时间窗口内所有字幕合并后的文本…… [【跳转到 12:34】](https://www.bilibili.com/video/<BV>/?t=754) | <img src="img/<视频ID>/00754.jpg" width="9000"> |
+| 该时间窗口内所有字幕合并后的文本…… [【跳转到 12:34】](https://www.bilibili.com/video/<BV>/?t=754) | <img src="img/<视频ID>/00754.webp" width="9000"> |
 ```
 
   无字幕窗口左栏写「（此区间无字幕）」；右栏内联 `<img width="9000">`（MD 表格无法指定列宽，用图片 width 撑大右栏，链接保持可点）。

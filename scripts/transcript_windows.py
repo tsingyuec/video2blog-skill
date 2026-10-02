@@ -12,7 +12,7 @@
     REWRITE
 
 文稿行格式约定（由 build_transcript.py 生成）：
-    | 字幕文本 [【跳转到 MM:SS】](url) | <img src="img/<视频ID>/SSSSS.jpg" width="9000"> |
+    | 字幕文本 [【跳转到 MM:SS】](url) | <img src="img/<视频ID>/SSSSS.webp" width="9000"> |
 
 其中 SSSSS = 窗口起点秒，既是图片文件名也是窗口号（5 位，00000 = 第 0 秒）。
 """
@@ -22,8 +22,8 @@ import argparse
 import re
 import sys
 
-# 右栏代表帧路径，如 img/BV1xx411c7mD/00754.jpg —— 编号即窗口起点秒
-FRAME_REF_PATTERN = re.compile(r"img/[^/]+/(\d+)\.jpg")
+# 右栏代表帧路径，如 img/BV1xx411c7mD/00754.webp —— 编号即窗口起点秒
+FRAME_REF_PATTERN = re.compile(r"img/[^/]+/(\d+)\.(?:jpg|jpeg|png|webp)", re.IGNORECASE)
 # 左栏文本与时间戳链接的分隔符（"[" 与 "【" 之间无空格）
 JUMP_LINK_PREFIX = " [【跳转到"
 JUMP_LINK_TAIL_PATTERN = re.compile(r" ?\[【跳转到[^\]]*\]\([^)]*\)")
