@@ -27,6 +27,7 @@ import json
 import os
 import random
 import sys
+import urllib.parse
 import urllib.request
 
 
@@ -50,6 +51,38 @@ HTTP_HEADERS = {
     "Content-Type": "application/json",
 }
 REQUEST_TIMEOUT_SEC = 30
+
+# 字幕默认目标语言（简体中文）；不指定时 kedou/平台返回的轨道语言不定。
+DEFAULT_TARGET_LANG = "zh-Hans"
+
+# 把 lang/langDesc 归一为语言代码，用于按目标语言挑选轨道。
+LANG_ALIASES = {
+    "zh-hant": ("hant", "zh-tw", "zh-hk", "tw", "hk", "繁体", "繁中", "cht"),
+    "zh-hans": ("hans", "zh-cn", "zh", "cn", "中文", "简体", "简中", "chs", "chinese"),
+    "en": ("en", "english", "英文", "英语"),
+    "ja": ("ja", "jp", "japanese", "日文", "日语", "日本"),
+    "ko": ("ko", "korean", "韩文", "韩语", "한국"),
+}
+
+
+def canonical_lang(text: str) -> str:
+    """把语言名/代码（如 中文、zh-Hans、English）归一为语言代码。"""
+    normalized = (text or "").strip().lower().replace("_", "-")
+    for code, aliases in LANG_ALIASES.items():
+        if any(alias in normalized for alias in aliases):
+            return code
+    return normalized
+
+
+def select_subtitle_item(items: list[dict], target_lang: str) -> dict:
+    """按目标语言从多轨道里挑一条；匹配不到则退回第一条（YouTube 靠 tlang 翻译）。"""
+    want = canonical_lang(target_lang) if target_lang else ""
+    if want:
+        for item in items:
+            if want in (canonical_lang(item.get("lang", "")),
+                        canonical_lang(item.get("langDesc", ""))):
+                return item
+    return items[0]
 
 # 支持的视频平台：视频页 URL 构造规则
 PLATFORM_URLS = {
@@ -267,21 +300,28 @@ def fetch_subtitle(video_url: str) -> dict:
     return request_json(EXTRACT_ENDPOINT, body)
 
 
-def resolve_subtitle_content(response: dict) -> str:
+def resolve_subtitle_content(response: dict, target_lang: str = DEFAULT_TARGET_LANG) -> str:
     """从响应中取出 SRT 文本；kedou 对部分平台只回字幕源地址而不内联文本。
 
-    YouTube 等平台的响应里 ``content`` 可能为 null，同时给一个 ``srcUrl``
-    （指向平台官方字幕，内容即标准 SRT）。此时下载 srcUrl 并回填到
-    content，保证下游 build_transcript.py 拿到统一格式。
+    多轨道时按 ``target_lang``（默认中文）挑选对应语言的轨道。YouTube 等平台的
+    响应里 ``content`` 可能为 null，同时给一个 ``srcUrl``（指向平台官方字幕，
+    内容即标准 SRT）：此时下载 srcUrl 并回填 content，下载前给地址注入 ``tlang``
+    让平台按目标语言翻译，保证下游 build_transcript.py 拿到统一格式。
     """
     items = (response.get("data") or {}).get("subtitleItemVoList") or []
     if not items:
         return ""
-    item = items[0]
+    item = select_subtitle_item(items, target_lang)
     content = item.get("content") or ""
     if content or not item.get("srcUrl"):
         return content
-    request = urllib.request.Request(item["srcUrl"],
+    src_url = item["srcUrl"]
+    if target_lang:
+        parts = urllib.parse.urlsplit(src_url)
+        query = [(k, v) for k, v in urllib.parse.parse_qsl(parts.query) if k != "tlang"]
+        query.append(("tlang", target_lang))
+        src_url = urllib.parse.urlunsplit(parts._replace(query=urllib.parse.urlencode(query)))
+    request = urllib.request.Request(src_url,
                                      headers={"User-Agent": HTTP_HEADERS["User-Agent"]})
     with urllib.request.urlopen(request, timeout=REQUEST_TIMEOUT_SEC) as resp:
         content = resp.read().decode("utf-8", errors="replace")
@@ -306,6 +346,9 @@ def parse_args() -> argparse.Namespace:
                         help="视频 ID：B 站为 BV 号，YouTube 为 11 位视频 ID")
     parser.add_argument("--platform", default="bilibili", choices=sorted(PLATFORM_URLS),
                         help="视频平台，默认 bilibili")
+    parser.add_argument("--lang", default=DEFAULT_TARGET_LANG,
+                        help="字幕目标语言（B 站按此选轨道，YouTube 按此翻译；"
+                             "默认 zh-Hans 简体中文；传空字符串则取第一条轨道）")
     return parser.parse_args()
 
 
@@ -319,7 +362,7 @@ def main() -> None:
     try:
         response = fetch_subtitle(video_url)
         subtitle_items = (response.get("data") or {}).get("subtitleItemVoList") or []
-        srt_text = resolve_subtitle_content(response)
+        srt_text = resolve_subtitle_content(response, target_lang=args.lang)
         with open(output_path, "w", encoding="utf-8") as f:
             json.dump(response, f, ensure_ascii=False)
         print(f"{args.bv}: ok code={response.get('code')} "
