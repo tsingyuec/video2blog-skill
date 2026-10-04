@@ -45,7 +45,7 @@ pip install -r requirements.txt   # opencv-python、numpy、pillow、yt-dlp
 <workdir>/
 ├─ videos/<视频ID>.mp4                   # 下载的视频（仅视频流）
 ├─ frames/<视频ID>/  00000.webp, …        # 1fps 抽帧（默认 WebP；编号 = 秒数，00000 = 第 0 秒）
-├─ subs/            <视频ID>.srt（+ kedou_<视频ID>.json）
+├─ subs/            <视频ID>.srt（+ B 站原始响应 kedou_<视频ID>.json）
 ├─ transcripts/<视频标题>.md              # ★ 视频演说图文稿（图-字幕对照）
 ├─ transcripts/img/<视频ID>/xxxxx.webp    # 稿中保留的代表帧
 └─ blog/
@@ -82,21 +82,23 @@ python scripts/extract_frames.py --workdir "<workdir>" --bv <BV>
 - 默认输出 WebP、保留原始分辨率、质量 100（不额外压缩画质）；体积过大时可用 `--width 960` 等比缩到宽 960，或调低 `--quality`（`--format jpg` 可换回 JPEG）。
 - 速度取决于 CPU 解码，长视频会慢一些；`--force` 可强制重跑。
 
-## 第 3 步：抓取字幕（在线服务 Kedou）
+## 第 3 步：抓取字幕（YouTube 优先 yt-dlp，B 站用 Kedou）
 
-抓取字幕采用在线字幕服务 **kedou.life** 的接口（支持 B 站与 YouTube）；它对 body 做了 RSA+AES 加密，`scripts/subtitle_fetch.py` 已实现（纯 Python 标准库，零依赖），直接跑：
+`scripts/subtitle_fetch.py` 统一入口，两个平台都产出 `subs/<视频ID>.srt`：
 
 ```bash
-# B 站
+# B 站（走 kedou.life 在线服务）
 python scripts/subtitle_fetch.py --workdir "<workdir>" --bv <BV>
 
-# YouTube
+# YouTube（先 yt-dlp 直拉官方 timedtext；被限流时自动回退 kedou 重试）
 python scripts/subtitle_fetch.py --platform youtube --bv <视频ID> --workdir "<workdir>"
 ```
 
-- 输出 `subs/kedou_<视频ID>.json`，其中 `data.subtitleItemVoList[0].content` 即 SRT 文本。
-- **限流**：连续请求约 10 次后返回 `code:500 请求过于频繁`。脚本默认每次间隔数秒并逐条容错；**大批量时分批、被限流后等 1–2 分钟再续**。
-- 若站点改版/失效（报加密错误、空字幕等），读 `reference/kedou-api.md` 了解加密原理与排查。
+- **语言**：默认 `zh-Hans`（简体中文），用 `--lang` 指定（`zh-CN`/`zh-TW`/`en`/`ja` 等会自动归一）。B 站据此在多轨道里选一条；YouTube 据此请求对应语言（含自动翻译）。`--lang ""` 则由平台默认。
+- **YouTube 回退链**：先 yt-dlp → 失败（多因 YouTube 对字幕端点限流 429）则走 kedou → 仍失败才报错退出。
+- B 站额外保留 `subs/kedou_<视频ID>.json` 原始响应备查；kedou 对 body 做了 RSA+AES 加密，脚本已实现（纯 Python 标准库）。
+- **限流**：B 站 kedou 连续请求约 10 次后返回 `code:500 请求过于频繁`，被限后等 1–2 分钟再续。YouTube 侧 429 换 IP/加 cookie 可缓解。
+- 若 kedou 改版/失效（报加密错误、空字幕等），读 `reference/kedou-api.md` 了解加密原理与排查。
 
 ## 第 4 步：生成「图-字幕」视频演说图文稿（去重 + 合并 + 时间戳）
 

@@ -2,8 +2,9 @@
 """生成「图片-字幕」原始文稿 —— 本工作流的核心工件。
 
 处理**单个视频**（产物以 ``--title`` 视频标题命名，多视频共用 workdir 时靠它区分）：
-  1) 若 ``subs/kedou_<视频ID>.json``（subtitle_fetch.py 的输出）存在，先导出
-     ``subs/<视频ID>.srt`` 与 ``subs/<视频ID>.txt``；
+  1) 确保 ``subs/<视频ID>.srt`` 与 ``subs/<视频ID>.txt`` 就绪（优先使用
+     subtitle_fetch.py 直接产出的 srt；缺失时兼容地从 ``subs/kedou_<视频ID>.json``
+     历史产物导出）；
   2) 对 ``frames/<视频ID>/`` 的 1fps 抽帧按「画面变化」切分时间窗口
      （帧缩到 32x18 灰度，与窗口代表帧做平均绝对差）；
   3) 每个窗口保留一张代表帧并合并窗口内字幕，输出 ``transcripts/<视频标题>.md``
@@ -95,35 +96,8 @@ def filename_from_title(title: str, fallback: str, max_length: int = 80) -> str:
 
 
 # ---------------------------------------------------------------- 字幕导出与解析
-def export_srt_from_kedou_json(workdir: str, video_id: str) -> None:
-    """把 subs/kedou_<视频ID>.json（subtitle_fetch.py 的输出）导出为
-    subs/<视频ID>.srt 与 subs/<视频ID>.txt。
-
-    已存在 srt 时跳过（幂等）；json 缺失或内容为空时静默返回，由后续
-    流程报告「缺少字幕」。
-    """
-    srt_path = os.path.join(workdir, "subs", video_id + ".srt")
-    json_path = os.path.join(workdir, "subs", f"kedou_{video_id}.json")
-
-    if not os.path.exists(json_path):
-        return
-
-    try:
-        with open(json_path, encoding="utf-8") as f:
-            payload = json.load(f)
-    except (json.JSONDecodeError, OSError):
-        return None
-
-    subtitle_items = (payload.get("data") or {}).get("subtitleItemVoList") or []
-    if not subtitle_items:
-        return None
-
-    srt_content = subtitle_items[0].get("content", "")
-    os.makedirs(os.path.join(workdir, "subs"), exist_ok=True)
-    with open(srt_path, "w", encoding="utf-8") as f:
-        f.write(srt_content)
-
-    # subs.txt：去掉序号行与时间轴行，只留字幕文本，便于通顺化时参考
+def write_subtitle_text(workdir: str, video_id: str, srt_content: str) -> None:
+    """由 SRT 内容生成 subs/<视频ID>.txt（去掉序号行与时间轴行，只留字幕文本）。"""
     text_lines = []
     for line in srt_content.splitlines():
         stripped = line.strip()
@@ -133,7 +107,38 @@ def export_srt_from_kedou_json(workdir: str, video_id: str) -> None:
     txt_path = os.path.join(workdir, "subs", video_id + ".txt")
     with open(txt_path, "w", encoding="utf-8") as f:
         f.write("\n".join(text_lines))
-    return video_id
+
+
+def ensure_subtitle_files(workdir: str, video_id: str) -> None:
+    """确保 subs/<视频ID>.srt 与 .txt 就绪（幂等），缺失时补写。
+
+    subtitle_fetch.py 会直接产出 srt（YouTube 走 yt-dlp、Bilibili 走 kedou）；
+    仅当 srt 缺失而存在历史产物 ``subs/kedou_<视频ID>.json`` 时，才从中导出
+    srt 作为兼容回退；json 也没有时静默返回，由后续流程报告「缺少字幕」。
+    """
+    srt_path = os.path.join(workdir, "subs", video_id + ".srt")
+    txt_path = os.path.join(workdir, "subs", video_id + ".txt")
+
+    if not os.path.exists(srt_path):
+        json_path = os.path.join(workdir, "subs", f"kedou_{video_id}.json")
+        if not os.path.exists(json_path):
+            return
+        try:
+            with open(json_path, encoding="utf-8") as f:
+                payload = json.load(f)
+        except (json.JSONDecodeError, OSError):
+            return
+        items = (payload.get("data") or {}).get("subtitleItemVoList") or []
+        srt_content = next((it.get("content") for it in items if it.get("content")), "")
+        if not srt_content:
+            return
+        os.makedirs(os.path.join(workdir, "subs"), exist_ok=True)
+        with open(srt_path, "w", encoding="utf-8") as f:
+            f.write(srt_content)
+
+    if not os.path.exists(txt_path):
+        with open(srt_path, encoding="utf-8") as f:
+            write_subtitle_text(workdir, video_id, f.read())
 
 
 def parse_srt(srt_path: str) -> list[tuple[float, str]]:
@@ -206,7 +211,7 @@ def build_transcript(workdir: str, video_id: str, title: str,
     video_id 即 --bv，用于定位 subs/frames 并生成时间戳跳转链接；
     输出文件名取自 --title（非法字符会被替换）。
     """
-    export_srt_from_kedou_json(workdir, video_id)
+    ensure_subtitle_files(workdir, video_id)
 
     frame_dir = os.path.join(workdir, "frames", video_id)
     frame_files = sorted(

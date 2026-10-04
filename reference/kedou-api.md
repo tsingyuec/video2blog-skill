@@ -1,6 +1,8 @@
 # Kedou 字幕接口：用法与维护
 
 > kedou.life 提供「粘贴 Bilibili/YouTube 链接 → 导出字幕」的在线服务，其网页端调用自有后端接口。本文件记录其请求加密方式，便于脚本长期可用以及故障排查。
+>
+> **现状**：`scripts/subtitle_fetch.py` 中 **B 站走 kedou、YouTube 走 yt-dlp**（两者同源于 YouTube 官方 timedtext）。本文件主要供 B 站字幕维护使用；下文的 YouTube `srcUrl` 处理仅作为脚本内兼容分支保留。
 
 ## 接口
 
@@ -80,7 +82,7 @@ YouTube 官方 timedtext 字幕（内容即标准 SRT）。`subtitle_fetch.py` �
 | `code:530 数据处理异常` | body 未加密 / 加密方式改变 | 核对本文件第 2–4 步；确认使用同一套 RSA+AES |
 | `code:500 请求过于频繁` | 触发限流 | 等待 1–2 分钟后分批重试 |
 | `code:200` 但 `subtitleItemVoList` 为空 | 该视频没有 AI 字幕（或解析失败） | 跳过，或改用 yt-dlp 直接拉字幕 / 本地 Whisper 转写 |
-| `code:200`、`content` 为 `null` | YouTube 模式：字幕在 `srcUrl` | 正常现象，脚本已自动下载回填 |
+| `code:200`、`content` 为 `null` | 走 kedou 拉 YouTube 时：字幕在 `srcUrl` | 正常现象，脚本会下载回填（YouTube 现默认改走 yt-dlp） |
 | `auth/keys` 报错 | 站点改版 | 重新从前端 JS 提取加密逻辑（搜索 `useReqPublicKey` / `encryptLong`） |
 
 ## 免责声明

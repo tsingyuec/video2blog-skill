@@ -61,7 +61,7 @@ Use the skills in "https://github.com/tsingyuec/video2blog-skill" that are relev
 <workdir>/
 ├─ videos/        video1.mp4                 # 下载的视频（仅视频流）
 ├─ frames/video1/    00000.webp, 00001.webp… # 1fps 抽帧（默认 WebP；编号 = 秒数）
-├─ subs/          video1.srt（+ kedou_<视频ID>.json）
+├─ subs/          video1.srt（+ B 站原始响应 kedou_<视频ID>.json）
 ├─ transcripts/<视频标题>.md                 # ★ 原始文稿（图-字幕对照）
 ├─ transcripts/img/video1/xxxxx.webp         # 稿中保留的代表帧
 └─ blog/
@@ -80,7 +80,7 @@ reference/
 scripts/
     ├─ download_video.py          # yt-dlp 封装：仅视频流下载，支持续传
     ├─ extract_frames.py          # OpenCV 1fps 抽帧
-    ├─ subtitle_fetch.py          # Kedou 字幕抓取（纯标准库，AES/RSA 内置实现）
+    ├─ subtitle_fetch.py          # 字幕抓取（B 站走 Kedou，YouTube 走 yt-dlp）
     ├─ build_transcript.py        # 分栏文稿生成（窗口去重 + 字幕合并 + 时间戳）
     └─ transcript_windows.py      # 文稿通顺化：窗口导出（dump）/ 写回（apply）
 examples/

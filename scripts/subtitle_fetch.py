@@ -1,17 +1,19 @@
 #!/usr/bin/env python3
-"""通过 kedou.life 在线字幕服务抓取视频平台的 AI 字幕（支持 Bilibili / YouTube）。
-纯 Python 标准库实现（零 pip 依赖）。
+"""抓取视频平台的 AI 字幕（Bilibili 走 kedou.life，YouTube 走 yt-dlp）。
 
-接口 body 需要 RSA+AES 加密（逆向自其前端，详见 reference/kedou-api.md）：
-  1) GET  /api/auth/keys              -> { k1: RSA 公钥, k2: 用私钥加密的 AES 密钥 }
-  2) aes_key = 公钥运算(k1, k2)       -> AES 密钥（实测 16 字符 -> AES-128，PKCS#1 type-01 块）
-  3) encrypted = AES-128-CBC/Pkcs7({"url":...}, key=aes_key, iv=base64 解码前 16 字节)
-  4) body = RSA-PKCS1#1v1.5 每 117 字符一块，块字节拼接后 base64（前端 encryptLong 等价）
-  5) POST /api/video/subtitleExtract  body=body  header 带 KdSystem: Kedou
+- YouTube：用 yt-dlp 直接拉官方 timedtext 字幕（自动字幕 + 自动翻译），
+  指定语言（默认中文 zh-Hans）后向 YouTube 请求该语言，产出 SRT。
+  与 kedou 同源，但少一个第三方依赖、无 kedou 的请求次数上限。
+- Bilibili：kedou 的接口 body 需要 RSA+AES 加密（逆向自其前端，详见
+  reference/kedou-api.md）：
+    1) GET  /api/auth/keys              -> { k1: RSA 公钥, k2: 用私钥加密的 AES 密钥 }
+    2) aes_key = 公钥运算(k1, k2)       -> AES 密钥（实测 16 字符 -> AES-128，PKCS#1 type-01 块）
+    3) encrypted = AES-128-CBC/Pkcs7({"url":...}, key=aes_key, iv=base64 解码前 16 字节)
+    4) body = RSA-PKCS1#1v1.5 每 117 字符一块，块字节拼接后 base64（前端 encryptLong 等价）
+    5) POST /api/video/subtitleExtract  body=body  header 带 KdSystem: Kedou
 
-输出：``<workdir>/subs/kedou_<视频ID>.json``，其中
-``data.subtitleItemVoList[0].content`` 即 SRT 文本（部分平台 content 为空、
-只有 srcUrl，脚本会自动下载回填）。
+输出：``<workdir>/subs/<视频ID>.srt``（统一给下游用）；Bilibili 额外保留
+``<workdir>/subs/kedou_<视频ID>.json`` 原始响应备查。
 
 目录约定：每个视频一个以 ``--bv``（视频 ID）命名的子目录，多个视频天然共存。
 
@@ -23,9 +25,11 @@ from __future__ import annotations
 
 import argparse
 import base64
+import glob
 import json
 import os
 import random
+import subprocess
 import sys
 import urllib.parse
 import urllib.request
@@ -83,6 +87,21 @@ def select_subtitle_item(items: list[dict], target_lang: str) -> dict:
                         canonical_lang(item.get("langDesc", ""))):
                 return item
     return items[0]
+
+
+# 归一语言 -> YouTube 字幕语言代码（YouTube 用 zh-Hans / zh-Hant 等）
+YOUTUBE_LANG_CODES = {
+    "zh-hans": "zh-Hans",
+    "zh-hant": "zh-Hant",
+    "en": "en",
+    "ja": "ja",
+    "ko": "ko",
+}
+
+
+def youtube_lang_code(target_lang: str) -> str:
+    """把目标语言转成 YouTube 的 --sub-langs 代码（如 zh-CN/中文 -> zh-Hans）。"""
+    return YOUTUBE_LANG_CODES.get(canonical_lang(target_lang), target_lang)
 
 # 支持的视频平台：视频页 URL 构造规则
 PLATFORM_URLS = {
@@ -330,44 +349,105 @@ def resolve_subtitle_content(response: dict, target_lang: str = DEFAULT_TARGET_L
 
 
 def build_video_url(platform: str, video_id: str) -> str:
-    """按平台构造视频页 URL（kedou 用它定位视频）。"""
+    """按平台构造视频页 URL（kedou / yt-dlp 用它定位视频）。"""
     builder = PLATFORM_URLS.get(platform)
     if builder is None:
         raise ValueError(f"不支持的平台: {platform}（可选: {', '.join(PLATFORM_URLS)}）")
     return builder(video_id)
 
 
+def write_srt(workdir: str, video_id: str, srt_text: str) -> str:
+    """把 SRT 文本写入 subs/<视频ID>.srt（下游统一入口），返回路径。"""
+    srt_path = os.path.join(workdir, "subs", video_id + ".srt")
+    with open(srt_path, "w", encoding="utf-8") as f:
+        f.write(srt_text)
+    return srt_path
+
+
+def fetch_youtube_subtitle(workdir: str, video_id: str, lang: str) -> str:
+    """用 yt-dlp 拉 YouTube 官方字幕（自动字幕 + 自动翻译），产出 subs/<视频ID>.srt。
+
+    与 kedou 同源（都是 YouTube timedtext），但无 kedou 的请求次数上限。
+    ``lang`` 会归一为 YouTube 语言代码（如 zh-CN -> zh-Hans）后作为 yt-dlp 的
+    ``--sub-langs``；为空则不指定，交由 yt-dlp 使用默认语言。注意 YouTube 侧
+    仍可能对字幕端点限流（HTTP 429，自动翻译轨尤其明显）。
+    """
+    subs_dir = os.path.join(workdir, "subs")
+    os.makedirs(subs_dir, exist_ok=True)
+    sub_lang = youtube_lang_code(lang) if lang else ""
+    cmd = [
+        sys.executable, "-m", "yt_dlp", "--no-warnings", "--newline",
+        "--skip-download", "--write-subs", "--write-auto-subs",
+        "--sub-format", "srt",
+        "-o", os.path.join(subs_dir, "%(id)s.%(ext)s"),
+    ]
+    if sub_lang:
+        cmd += ["--sub-langs", sub_lang]
+    cmd.append(build_video_url("youtube", video_id))
+    print(">", " ".join(cmd))
+    if subprocess.call(cmd) != 0:
+        raise RuntimeError("字幕下载失败（检查网络/YouTube 限流，"
+                           "或该视频是否有对应语言字幕）")
+
+    candidates = glob.glob(os.path.join(subs_dir, f"{video_id}.*.srt"))
+    if not candidates:
+        raise RuntimeError(f"yt-dlp 未产出字幕文件（该视频可能没有 {sub_lang} 字幕）")
+    preferred = os.path.join(subs_dir, f"{video_id}.{sub_lang}.srt") if sub_lang else ""
+    source = preferred if preferred in candidates else candidates[0]
+    with open(source, encoding="utf-8") as f:
+        srt_path = write_srt(workdir, video_id, f.read())
+    if os.path.abspath(source) != os.path.abspath(srt_path):
+        os.remove(source)
+    return srt_path
+
+
+def fetch_kedou_subtitle(workdir: str, platform: str, video_id: str, lang: str) -> str:
+    """用 kedou.life 抓取字幕，产出 subs/<视频ID>.srt，并保留原始 JSON 备查。"""
+    subs_dir = os.path.join(workdir, "subs")
+    os.makedirs(subs_dir, exist_ok=True)
+    response = fetch_subtitle(build_video_url(platform, video_id))
+    items = (response.get("data") or {}).get("subtitleItemVoList") or []
+    srt_text = resolve_subtitle_content(response, target_lang=lang)
+    json_path = os.path.join(subs_dir, f"kedou_{video_id}.json")
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(response, f, ensure_ascii=False)
+    srt_path = write_srt(workdir, video_id, srt_text)
+    print(f"{video_id}: ok code={response.get('code')} "
+          f"status={(response.get('data') or {}).get('status')} tracks={len(items)} "
+          f"srt_bytes={len(srt_text.encode('utf-8'))} -> {srt_path}")
+    return srt_path
+
+
 # ---------------------------------------------------------------- CLI
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="通过 kedou.life 抓取视频平台的 AI 字幕")
+    parser = argparse.ArgumentParser(
+        description="抓取视频平台 AI 字幕（Bilibili 用 kedou，YouTube 用 yt-dlp）")
     parser.add_argument("--workdir", required=True,
-                        help="工作目录（输出到 <workdir>/subs/kedou_<视频ID>.json）")
+                        help="工作目录（输出到 <workdir>/subs/<视频ID>.srt）")
     parser.add_argument("--bv", required=True,
                         help="视频 ID：B 站为 BV 号，YouTube 为 11 位视频 ID")
     parser.add_argument("--platform", default="bilibili", choices=sorted(PLATFORM_URLS),
                         help="视频平台，默认 bilibili")
     parser.add_argument("--lang", default=DEFAULT_TARGET_LANG,
-                        help="字幕目标语言（B 站按此选轨道，YouTube 按此翻译；"
-                             "默认 zh-Hans 简体中文；传空字符串则取第一条轨道）")
+                        help="字幕目标语言（默认 zh-Hans 简体中文；B 站按此选轨道，"
+                             "YouTube 按此请求翻译字幕；传空字符串则由平台默认）")
     return parser.parse_args()
 
 
 def main() -> None:
     _force_utf8_stdio()
     args = parse_args()
-    subs_dir = os.path.join(args.workdir, "subs")
-    os.makedirs(subs_dir, exist_ok=True)
-    video_url = build_video_url(args.platform, args.bv)
-    output_path = os.path.join(subs_dir, f"kedou_{args.bv}.json")
     try:
-        response = fetch_subtitle(video_url)
-        subtitle_items = (response.get("data") or {}).get("subtitleItemVoList") or []
-        srt_text = resolve_subtitle_content(response, target_lang=args.lang)
-        with open(output_path, "w", encoding="utf-8") as f:
-            json.dump(response, f, ensure_ascii=False)
-        print(f"{args.bv}: ok code={response.get('code')} "
-              f"status={response.get('data', {}).get('status')} "
-              f"tracks={len(subtitle_items)} srt_bytes={len(srt_text.encode('utf-8'))} -> {output_path}")
+        if args.platform == "youtube":
+            try:
+                srt_path = fetch_youtube_subtitle(args.workdir, args.bv, args.lang)
+            except Exception as exc:
+                print(f"{args.bv}: yt-dlp 抓取失败（{exc}），改用 kedou 重试…")
+                srt_path = fetch_kedou_subtitle(args.workdir, "youtube", args.bv, args.lang)
+            print(f"{args.bv}: ok platform=youtube "
+                  f"srt_bytes={os.path.getsize(srt_path)} -> {srt_path}")
+        else:
+            fetch_kedou_subtitle(args.workdir, args.platform, args.bv, args.lang)
     except Exception as exc:
         print(f"{args.bv}: ERR {exc}")
         raise SystemExit(1)
