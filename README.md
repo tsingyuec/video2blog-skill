@@ -1,98 +1,175 @@
-# video2blog-skill
+# video2blog
 
 [![skills.sh](https://skills.sh/b/tsingyuec/video2blog-skill)](https://skills.sh/tsingyuec/video2blog-skill)
 ![Platform](https://img.shields.io/badge/platform-Bilibili%20%7C%20YouTube-blue)
+![Python](https://img.shields.io/badge/python-3.9%2B-blue)
 ![License](https://img.shields.io/badge/license-MIT-green)
 
-把视频（**Bilibili / YouTube 视频**）整理成图文技术博客的**端到端 Agent Skill**。可作为 [Claude / 通用 Agent Skill](https://github.com/anthropics/skills) 使用，也可单独使用其中的脚本。
+English | [简体中文](./README.zh-CN.md)
 
-> **核心理念**：博客必须建立在可核查的「原始文稿」之上，而不是凭空概括——每个知识点都能回跳到视频原片对应秒数。
+A long video keeps its information concentrated on a few dozen slides, each of which
+flips past in a moment; to find a particular point afterwards, you have to watch from
+the start. video2blog reorganises the material: it cuts the video where the picture
+changes, and gives each segment one representative frame, the captions spoken over it
+and a timestamp link back to the video, which together form the video transcript. The
+post is written from that transcript alone and consults no other material, so every
+sentence rests on the video's original captions. A slide that lingers still yields a
+single frame, and an hour-long lecture ends up at about two hundred lines. Reading the
+finished post is enough to grasp the video as a whole, and for the parts that matter,
+the timestamp jumps to the corresponding point in the playback.
 
-## 处理流程
+[Example](#example) • [Install](#install) • [How it works](#how-it-works) • [Output](#output) • [Limitations](#limitations) • [Repo structure](#repo-structure)
 
-- 输入：视频链接（Bilibili / YouTube）
-- ① 下载视频（yt-dlp）
-- ② 每秒抽取一张视频帧，并按画面变化去重，得到关键帧
-- ③ 抓取平台 AI 字幕（Kedou），并根据关键帧划分窗口，合并窗口内的字幕
-- ④ 逐窗口改写文稿使其字幕通顺，得到「图-字幕」文稿，附带时间戳可跳转到视频对应位置
-- ⑤ 基于文稿整理得到结构清晰的博客
+## Example
 
-## 特性
+![Split view: the transcript on the left, the blog written from it on the right](examples/en/example.png)
 
-- **自动化流程**：输入视频链接后，下载、抽帧、抓字幕、生成图文文稿、写博客依次完成，长视频无需从头观看。
-- **内容可回溯**：博客基于视频原始字幕与幻灯片撰写，正文时间戳可跳回原片对应位置进行回看。
-- **金字塔写作**：结论先行、SCQA 开篇，术语首次出现时解释，标题写成观点句。
-- **关键帧去重**：同一画面无论停留多久只保留一张代表帧，文稿中不会堆叠重复截图。
-- **多平台支持**：B 站与 YouTube 通用；字幕直接读取平台 AI 字幕，抓取逻辑用标准库实现，无第三方依赖。
+> The transcript is on the left; the blog written from it is on the right.
 
-## 手动安装
+One run on Stanford CS336 *Lecture 7, Parallel training* (61 minutes, on Bilibili):
 
-```bash
-pip install -r requirements.txt   # opencv-python、numpy、pillow、yt-dlp
-# 无桌面环境可把 opencv-python 换成 opencv-python-headless
-```
+| | |
+| --- | --- |
+| Input | [`bilibili.com/video/BV11LEA6eEuj/?p=7`](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7) |
+| Transcript | [`examples/en/transcript.md`](examples/en/transcript.md), 185 windows |
+| Blog | [`examples/en/blog.md`](examples/en/blog.md), 11 sections |
 
-作为 Agent Skill 使用可通过 skills CLI 安装（自动将本仓库放入技能目录 `~/.agent/skills/video2blog/`）：
+The transcript is a Markdown table: captions on the left, one frame on the right, one
+timestamp per row. The blog keeps those timestamps inline.
+
+Images are hosted on the `media` branch so a `--depth 1` install does not download them.
+
+## Install
 
 ```bash
 npx skills add tsingyuec/video2blog-skill
 ```
 
-## 由你的Agent安装
+The CLI copies the skill into `.agents/skills/video2blog/` for the current project,
+or into your global skills directory with `--global`. After that the agent loads it
+whenever you paste a video link:
 
 ```
-Use the skills in "https://github.com/tsingyuec/video2blog-skill" that are relevant to the current task. Run `npx skills add "https://github.com/tsingyuec/video2blog-skill"` and select the relevant skills, then follow their instructions.
+Turn this video into a blog post: https://www.bilibili.com/video/BV11LEA6eEuj/?p=7
 ```
 
-## 示例输出
+<details>
+<summary>Manual install, or running the scripts yourself</summary>
 
-采用本 skill 对《[Stanford CS336 第 7 讲 · 并行训练](https://www.bilibili.com/video/BV11LEA6eEuj/?p=7)》完整跑一遍得到：
+Python 3.9 or newer. ffmpeg is not needed: only the video stream is downloaded, and
+the captions come from the platform, so there is nothing to mux.
 
-![示例：图-字幕原始文稿（左字幕、右代表帧，可点击时间戳）](https://raw.githubusercontent.com/tsingyuec/video2blog-skill/media/docs/example.png)
+| Package | Used for |
+| --- | --- |
+| `opencv-python` | frame extraction |
+| `numpy` | frame comparison for de-duplication |
+| `pillow` | image handling |
+| `yt-dlp` | video download, YouTube captions |
 
-- [`blog.md`](examples/blog.md)：最终博客（金字塔结构 + 术语速查表 + 时间戳回链）
-- [`transcript.md`](examples/transcript.md)：第 4 步的原始文稿（图-字幕分栏，每行可回跳视频）
+```bash
+pip install -r requirements.txt
+# on a headless machine, use opencv-python-headless
 
-> 示例配图托管在同仓库的 `media` 分支（`--depth 1` 安装不会下载），画面帧截取自上述 B 站视频，仅用于演示本 skill 的输出效果。
+python scripts/download_video.py   --workdir ./work --bv BV11LEA6eEuj
+python scripts/extract_frames.py   --workdir ./work --bv BV11LEA6eEuj
+python scripts/subtitle_fetch.py   --workdir ./work --bv BV11LEA6eEuj
+python scripts/build_transcript.py --workdir ./work --bv BV11LEA6eEuj --title "Lecture 7"
+```
 
-## 产物目录约定
+Every script runs on its own; `python scripts/<name>.py --help` lists its options.
+The full five-step workflow and its tuning parameters are in [`SKILL.md`](SKILL.md).
+</details>
+
+## How it works
+
+```
+ video URL
+    │
+    ├─① download ──► videos/<id>.mp4          yt-dlp, video stream only
+    ├─② extract ───► frames/<id>/00012.webp   one frame per second, named by second
+    ├─③ captions ──► subs/<id>.srt            Kedou on Bilibili, yt-dlp on YouTube
+    ├─④ transcript ► transcripts/<title>.md   windows, merged captions, timestamps
+    └─⑤ blog ──────► blog/<title>.md          written from ④
+```
+
+Steps ② to ④ carry the weight.
+
+Frame extraction runs at 1 fps. A slide that stays up for 30 seconds therefore
+produces 30 nearly identical frames. Each frame is reduced to 32×18 grayscale and
+compared with its window's representative frame; a new window starts only when the
+difference exceeds `--diff` and the window is at least `--minwin` seconds old. On
+lecture videos that discards around 95% of the frames and keeps every slide.
+
+Captions are machine-generated, so a window's text arrives as a run of fragments
+with broken sentence boundaries. The transcript is dumped window by window,
+rewritten for readability, and written back. The rewrite may smooth the text but may
+not add or drop information. The blog is written after that pass, not before it.
+
+## Output
 
 ```
 <workdir>/
-├─ videos/        video1.mp4                 # 下载的视频（仅视频流）
-├─ frames/video1/    00000.webp, 00001.webp… # 1fps 抽帧（默认 WebP；编号 = 秒数）
-├─ subs/          video1.srt（+ B 站原始响应 kedou_<视频ID>.json）
-├─ transcripts/<视频标题>.md                 # ★ 原始文稿（图-字幕对照）
-├─ transcripts/img/video1/xxxxx.webp         # 稿中保留的代表帧
+├─ videos/<id>.mp4                    # video stream only
+├─ frames/<id>/00000.webp …           # 1 fps, filename is the second
+├─ subs/<id>.srt                      # captions; Bilibili also keeps Kedou's JSON
+├─ transcripts/<title>.md             # the transcript
+├─ transcripts/img/<id>/xxxxx.webp    # representative frames only
 └─ blog/
-   ├─ <视频标题>.md                        # ★ 本视频的博客
-   └─ assets/                             # 博客配图
+   ├─ <title>.md                      # the blog
+   └─ assets/                         # blog images
 ```
 
-## 项目结构
+## Limitations
+
+Bilibili captions come from [Kedou](https://www.kedou.life), a free service that starts
+returning `code:500 请求过于频繁` after roughly 10 calls. Wait a minute or two and
+continue. YouTube may return `429` on its caption endpoint, and the scripts then fall
+back to Kedou.
+
+Kedou's request body is RSA+AES encrypted and the scripts reimplement that encryption
+with the standard library. An API change breaks caption fetching until the code is
+updated; see [`reference/kedou-api.md`](reference/kedou-api.md).
+
+The scripts do not pass cookies to yt-dlp. Streams above 1080p and some videos need an
+account, so `--cookies-from-browser firefox` has to be added by hand.
+
+Frame extraction is CPU-bound: an hour of video takes minutes. Lower `--width` or
+`--fps` if that is too slow.
+
+Captions contain recognition errors. `CS336` comes through as "cs three three nox", and
+names and terms are often mangled, so the rewrite pass is not optional.
+
+Steps ④ and ⑤ run in batches of 30 to 60 windows, which keeps each tool call small at
+the cost of many turns on long videos.
+
+## Repo structure
 
 ```
-SKILL.md                      # 技能主文件：完整工作流（任务速查表 + 5 步流程）
-requirements.txt              # Python 依赖清单
+SKILL.md                   # the workflow the agent follows
+requirements.txt
 reference/
-    ├─ blog-writing.md            # 金字塔写作风格 + 初学者可读写作规范（写博客前必读）
-    └─ kedou-api.md               # Kedou 字幕接口：加密原理与排查（字幕报错时读）
+    ├─ blog-writing.md     # writing style: pyramid structure, SCQA, glossary
+    └─ kedou-api.md        # Kedou caption API: encryption and troubleshooting
 scripts/
-    ├─ download_video.py          # yt-dlp 封装：仅视频流下载，支持续传
-    ├─ extract_frames.py          # OpenCV 1fps 抽帧
-    ├─ subtitle_fetch.py          # 字幕抓取（B 站走 Kedou，YouTube 走 yt-dlp）
-    ├─ build_transcript.py        # 分栏文稿生成（窗口去重 + 字幕合并 + 时间戳）
-    └─ transcript_windows.py      # 文稿通顺化：窗口导出（dump）/ 写回（apply）
+    ├─ download_video.py   # yt-dlp wrapper, video stream only, resumable
+    ├─ extract_frames.py   # OpenCV frame extraction
+    ├─ subtitle_fetch.py   # captions: Kedou on Bilibili, yt-dlp on YouTube
+    ├─ build_transcript.py # windows, de-duplication, merged captions, timestamps
+    └─ transcript_windows.py # dump and apply windows when rewriting
 examples/
-    ├─ blog.md                    # 完整示例产出：最终博客
-    └─ transcript.md              # 完整示例产出：图-字幕原始文稿
+    ├─ zh-CN/              # example output, Chinese
+    │   ├─ blog.md
+    │   └─ transcript.md
+    └─ en/                 # example output, English
+        ├─ blog.md
+        └─ transcript.md
 ```
 
-## 致谢
+## Acknowledgements
 
-- [yt-dlp](https://github.com/yt-dlp/yt-dlp) — 视频下载
-- [kedou.life](https://www.kedou.life) — 在线字幕解析服务
-- [anthropics/skills](https://github.com/anthropics/skills) — Agent Skill 规范
+- [yt-dlp](https://github.com/yt-dlp/yt-dlp) for video download
+- [kedou.life](https://www.kedou.life) for online caption extraction
+- [anthropics/skills](https://github.com/anthropics/skills) for the Agent Skills standard
 
 ## License
 
