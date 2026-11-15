@@ -80,8 +80,6 @@ Bilibili captions come from [Kedou](https://www.kedou.life), a free service that
 
 Kedou's request body is RSA+AES encrypted and the scripts reproduce that encryption with the standard library. If the API changes, caption fetching stops working until the encryption is updated; see [`reference/kedou-api.md`](reference/kedou-api.md) for the debugging notes.
 
-The scripts do not pass cookies to yt-dlp. Videos above 1080p, member-only videos and age-restricted videos need an account, so `--cookies-from-browser firefox` has to be added by hand.
-
 A video with no caption track cannot be processed. Nothing here transcribes audio: the text always comes from the platform, so a video without captions yields an empty transcript.
 
 Frame extraction is CPU-bound, so an hour of video takes minutes rather than seconds. Lower `--width` or `--fps` to speed it up.

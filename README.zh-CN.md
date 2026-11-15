@@ -80,8 +80,6 @@ B 站字幕来自 [Kedou](https://www.kedou.life)，免费服务，连续调用�
 
 Kedou 的请求体做了 RSA+AES 加密，脚本用标准库复现。接口一变，字幕抓取就会失效，直到加密逻辑更新；排查方法见 [`reference/kedou-api.md`](reference/kedou-api.md)。
 
-脚本不给 yt-dlp 传 cookie。1080p 以上的画质、会员专属、有年龄限制的视频都需要登录，这种情况要自己加 `--cookies-from-browser firefox`。
-
 没有字幕轨的视频无法处理。这里不做语音转写，文字全部来自平台，没有字幕就只会得到一份空文稿。
 
 抽帧受限于 CPU：一小时的视频要跑几分钟而不是几秒，嫌慢可降低 `--width` 或 `--fps`。
