@@ -1,11 +1,8 @@
 # video2blog
 
 [![skills.sh](https://skills.sh/b/tsingyuec/video2blog-skill)](https://skills.sh/tsingyuec/video2blog-skill)
-
 ![Platform](https://img.shields.io/badge/platform-Bilibili%20%7C%20YouTube-blue)
-
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
-
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 [English](./README.md) | 简体中文
