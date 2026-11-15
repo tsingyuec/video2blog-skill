@@ -1,8 +1,11 @@
 # video2blog
 
 [![skills.sh](https://skills.sh/b/tsingyuec/video2blog-skill)](https://skills.sh/tsingyuec/video2blog-skill)
+
 ![Platform](https://img.shields.io/badge/platform-Bilibili%20%7C%20YouTube-blue)
+
 ![Python](https://img.shields.io/badge/python-3.9%2B-blue)
+
 ![License](https://img.shields.io/badge/license-MIT-green)
 
 [English](./README.md) | 简体中文
@@ -25,69 +28,35 @@
 | 文稿 | [`examples/zh-CN/transcript.md`](examples/zh-CN/transcript.md)，185 个窗口 |
 | 博客 | [`examples/zh-CN/blog.md`](examples/zh-CN/blog.md)，11 个小节 |
 
-文稿是 Markdown 表格：左边字幕，右边一张代表帧，每行一个时间戳。博客保留这些时间戳。
-
-图片托管在 `media` 分支，`--depth 1` 安装不会把它们一起拉下来。
-
 ## 安装
 
 ```bash
 npx skills add tsingyuec/video2blog-skill
 ```
 
-命令会把 skill 复制到当前项目的 `.agents/skills/video2blog/`，加上 `--global` 则装到全局。
-之后把视频链接交给 agent 即可：
+命令会把 skill 复制到当前项目的 `.agents/skills/video2blog/`，加上 `--global` 则装到全局。它需要 Python 3.9 以上和 `requirements.txt` 里的依赖；不需要 ffmpeg，因为只下载视频流，字幕来自平台。
+
+装好之后，把视频链接交给 agent 即可：
 
 ```
 把这个视频整理成一篇博客：https://www.bilibili.com/video/BV11LEA6eEuj/?p=7
 ```
 
-<details>
-<summary>手动安装，或自己调用脚本</summary>
-
-需要 Python 3.9 以上。不需要 ffmpeg：只下载视频流，字幕来自平台，没有音视频要封装。
-
-| 依赖 | 用途 |
-| --- | --- |
-| `opencv-python` | 抽帧 |
-| `numpy` | 帧间比较，用于去重 |
-| `pillow` | 图像处理 |
-| `yt-dlp` | 视频下载，YouTube 字幕 |
-
-```bash
-pip install -r requirements.txt
-# 无桌面环境请改用 opencv-python-headless
-
-python scripts/download_video.py   --workdir ./work --bv BV11LEA6eEuj
-python scripts/extract_frames.py   --workdir ./work --bv BV11LEA6eEuj
-python scripts/subtitle_fetch.py   --workdir ./work --bv BV11LEA6eEuj
-python scripts/build_transcript.py --workdir ./work --bv BV11LEA6eEuj --title "第7讲"
-```
-
-每个脚本均可独立运行，`python scripts/<name>.py --help` 查看参数。完整的五步流程与调参
-说明在 [`SKILL.md`](SKILL.md)。
-</details>
-
 ## 工作流程
 
-```
- 视频链接
-    │
-    ├─① 下载 ──► videos/<id>.mp4          yt-dlp，仅视频流
-    ├─② 抽帧 ──► frames/<id>/00012.webp   每秒一帧，文件名即秒数
-    ├─③ 字幕 ──► subs/<id>.srt            B 站走 Kedou，YouTube 走 yt-dlp
-    ├─④ 文稿 ──► transcripts/<标题>.md     窗口切分、字幕合并、时间戳
-    └─⑤ 博客 ──► blog/<标题>.md            从 ④ 写出来
-```
+| 步骤 | 做什么 | 产物 |
+| --- | --- | --- |
+| ① 下载 | yt-dlp 只取视频流，不要音频 | `videos/<id>.mp4` |
+| ② 抽帧 | 每秒一张，保持原分辨率 | `frames/<id>/00012.webp` |
+| ③ 字幕 | B 站走 Kedou，YouTube 走 yt-dlp | `subs/<id>.srt` |
+| ④ 文稿 | 按画面变化切窗口，合并窗口内字幕，加时间戳 | `transcripts/<标题>.md` |
+| ⑤ 博客 | 只依据文稿写作 | `blog/<标题>.md` |
 
-工作量主要在 ② 到 ④。
+文稿按"窗口"切分。窗口指画面保持不变的一段时间：一张幻灯片停多久，这个窗口就有多长。每个窗口对应文稿里的一行，一行配一张代表帧。
 
-抽帧是每秒一张。一张幻灯片停留 30 秒，就会得到 30 张几乎一样的帧。脚本把每帧缩到 32×18
-灰度，和当前窗口的代表帧算平均绝对差；差异超过 `--diff`、且当前窗口已满 `--minwin` 秒，
-才开新窗口。课堂录像上大约能去掉 95% 的帧，同时不丢任何一页。
+第 ② 步抽帧是每秒一张，一张幻灯片停 30 秒就有 30 张几乎相同的帧。第 ④ 步通过脚本 `scripts/build_transcript.py` 把每帧缩到 32×18 灰度，与当前窗口的代表帧比较平均绝对差：差值大于 12，且当前画面已停留至少 5 秒，才开新窗口；同一画面停留超过 25 秒，强制切分。课堂录像上能去掉约 95% 的帧，且不漏掉任何一页。这三个数是默认值，可通过参数 `--diff`、`--minwin`、`--maxwin` 调整。
 
-AI 字幕是机器生成的，一个窗口里的文字是一串断句错位的碎片。文稿会按窗口导出、逐窗改写通顺、
-再写回；改写只负责顺句子，不能增加也不能删掉信息。博客在这一步之后才写。
+文稿按窗口导出，逐窗改写通顺，再写回。改写只顺句子，不增加也不删掉信息。博客在这一步之后写，依据是改写后的文稿，不是原始字幕。
 
 ## 产物
 
@@ -103,24 +72,23 @@ AI 字幕是机器生成的，一个窗口里的文字是一串断句错位的�
    └─ assets/                         # 博客配图
 ```
 
+帧文件以取帧的秒数命名，`00123.webp` 就是第 123 秒（00:02:03），生成时间戳链接时不需要额外的对照表。文稿和博客以视频标题命名：文件名里不能用的字符会被替换，过长的标题会截断。两者都是 Markdown，图片用相对路径引用，一份写完的文稿可以直接搬走或发布。
+
 ## 已知限制
 
-B 站字幕来自 [Kedou](https://www.kedou.life)，一个免费服务：连续调用约 10 次后开始返回
-`code:500 请求过于频繁`，等一两分钟再继续。YouTube 的字幕端点可能返回 `429`，此时脚本会
-自动回退到 Kedou。
+B 站字幕来自 [Kedou](https://www.kedou.life)，免费服务，连续调用约 10 次后开始返回`code:500 请求过于频繁`，等一两分钟再继续。YouTube 的字幕端点可能返回 `429`，脚本会自动回退到 Kedou。
 
-Kedou 的请求体做了 RSA+AES 加密，脚本用标准库复现了这套加密。接口一变，字幕抓取就会
-失效，直到加密逻辑跟着更新，见 [`reference/kedou-api.md`](reference/kedou-api.md)。
+Kedou 的请求体做了 RSA+AES 加密，脚本用标准库复现。接口一变，字幕抓取就会失效，直到加密逻辑更新；排查方法见 [`reference/kedou-api.md`](reference/kedou-api.md)。
 
-脚本目前不给 yt-dlp 传 cookie。1080p 以上的画质和部分视频需要登录，这种情况只能自己加
-`--cookies-from-browser firefox`。
+脚本不给 yt-dlp 传 cookie。1080p 以上的画质、会员专属、有年龄限制的视频都需要登录，这种情况要自己加 `--cookies-from-browser firefox`。
 
-抽帧受限于 CPU：一小时的视频需要运行数分钟，过慢可降低 `--width` 或 `--fps`。
+没有字幕轨的视频无法处理。这里不做语音转写，文字全部来自平台，没有字幕就只会得到一份空文稿。
 
-字幕有识别错误。`CS336` 会变成 "cs three three nox"，人名和术语也常错，改写这一步不能
-跳过。
+抽帧受限于 CPU：一小时的视频要跑几分钟而不是几秒，嫌慢可降低 `--width` 或 `--fps`。
 
-④ 和 ⑤ 按每批 30 到 60 个窗口执行，单次调用因此不会过大，代价是长视频要跑很多轮。
+字幕有识别错误。`CS336` 会变成 "cs three three nox"，人名和术语也常错，改写这一步不能跳过。
+
+④ 和 ⑤ 每批处理 30 到 60 个窗口，单次调用不会过大，代价是长视频要跑很多轮。
 
 ## 项目结构
 
