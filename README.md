@@ -76,17 +76,9 @@ Frames are named by the second they were taken from, so `00123.webp` is the fram
 
 ## Limitations
 
-Bilibili captions come from [Kedou](https://www.kedou.life), a free service that returns `code:500 请求过于频繁` after about ten calls. Wait a minute or two and continue. YouTube may return `429` on its caption endpoint, and the scripts then fall back to Kedou.
-
 Kedou's request body is RSA+AES encrypted and the scripts reproduce that encryption with the standard library. If the API changes, caption fetching stops working until the encryption is updated; see [`reference/kedou-api.md`](reference/kedou-api.md) for the debugging notes.
 
-A video with no caption track cannot be processed. Nothing here transcribes audio: the text always comes from the platform, so a video without captions yields an empty transcript.
-
 Frame extraction is CPU-bound, so an hour of video takes minutes rather than seconds. Lower `--width` or `--fps` to speed it up.
-
-Captions contain recognition errors. `CS336` comes through as "cs three three nox", and names and terms are often mangled, so the rewrite pass cannot be skipped.
-
-Windows are rewritten in batches of 30 to 60 to keep each tool call small; long videos therefore take many turns.
 
 ## Repo structure
 

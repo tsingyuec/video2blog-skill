@@ -76,17 +76,9 @@ npx skills add tsingyuec/video2blog-skill
 
 ## 已知限制
 
-B 站字幕来自 [Kedou](https://www.kedou.life)，免费服务，连续调用约 10 次后开始返回`code:500 请求过于频繁`，等一两分钟再继续。YouTube 的字幕端点可能返回 `429`，脚本会自动回退到 Kedou。
-
 Kedou 的请求体做了 RSA+AES 加密，脚本用标准库复现。接口一变，字幕抓取就会失效，直到加密逻辑更新；排查方法见 [`reference/kedou-api.md`](reference/kedou-api.md)。
 
-没有字幕轨的视频无法处理。这里不做语音转写，文字全部来自平台，没有字幕就只会得到一份空文稿。
-
 抽帧受限于 CPU：一小时的视频要跑几分钟而不是几秒，嫌慢可降低 `--width` 或 `--fps`。
-
-字幕有识别错误。`CS336` 会变成 "cs three three nox"，人名和术语也常错，改写这一步不能跳过。
-
-④ 和 ⑤ 每批处理 30 到 60 个窗口，单次调用不会过大，代价是长视频要跑很多轮。
 
 ## 项目结构
 
