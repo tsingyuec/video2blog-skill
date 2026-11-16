@@ -1,8 +1,7 @@
 #!/usr/bin/env python3
-"""把强化学习博客里「代码样式公式」批量转成 KaTeX 行内公式。
+"""把博客里「代码样式公式」批量转成 KaTeX 行内公式。
 
-只处理被 check_md_math.mjs 判定为「疑似未转换」的反引号片段：
-含 _ ^ { } \\ 或数学关键字，且不是纯标识符。
+只处理「疑似未转换」的反引号片段：含 _ ^ { } \\ 或数学关键字，且不是纯标识符。
 
 用法：
   python3 scripts/check/convert_math_inline.py --dry-run <md...>

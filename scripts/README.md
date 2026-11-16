@@ -18,20 +18,15 @@
 
 | 脚本 | 检查什么 | 依赖 |
 | --- | --- | --- |
-| `check_images.mjs` | 图片引用是否存在、是否普通文件/0 字节、扩展名与文件头是否一致、是否在发布白名单、目录内孤儿图 | Node.js |
-| `check_blog.mjs` | 时间戳数量与 `t` 一致性、标题层级、`<img>`/width 写法 | Node.js |
-| `check_md_math.mjs` | 源文件公式能否被 KaTeX 渲染、落单 `$`、残留代码样式公式 | Node.js + KaTeX |
-| `check_katex.mjs` | 构建产物里的公式与残留 `$` | Node.js + KaTeX |
-| `katex.mjs` | 定位 KaTeX（`KATEX_PATH` 或项目 `vendor/katex/`），供两个公式检查脚本复用 | Node.js |
-| `convert_math_inline.py` | 把代码样式公式批量转成 KaTeX 的迁移工具（按需） | Python 3 |
+| `check_images.py` | 图片引用是否存在、是否普通文件/0 字节、扩展名与文件头是否一致、是否在发布白名单、目录内孤儿图 | Python 3 |
+| `check_blog.py` | 时间戳数量与 `t` 一致性、标题层级、`<img>`/width 写法 | Python 3 |
+| `convert_math_inline.py` | 把代码样式公式批量转成 `$...$` 的迁移工具（按需） | Python 3 |
 
 ```bash
-node scripts/check/check_images.mjs <博客文件或目录>
-node scripts/check/check_blog.mjs <博客文件或目录>
-node scripts/check/check_md_math.mjs <博客文件或目录>
-node scripts/check/check_katex.mjs <构建产物目录> --recursive
+python3 scripts/check/check_images.py <博客文件或目录>
+python3 scripts/check/check_blog.py <博客文件或目录>
 ```
 
-`check_md_math.mjs` / `check_katex.mjs` 从当前目录向上查找 `vendor/katex/katex.mjs` 或 `node_modules/katex/dist/katex.mjs`；找不到时用 `KATEX_PATH=/path/to/katex.mjs` 指定。脚本的退出码：0 通过，1 有问题，2 用法/依赖错误。
+公式渲染检查与构建检查由具体项目维护，不在本 skill 内。脚本的退出码：0 通过，1 有问题，2 用法错误。
 
-**以脚本输出为准**：报告里的缺失、格式、孤儿图、公式错误都要修到 0；不要改脚本或忽略输出。
+**以脚本输出为准**：报告里的缺失、格式、孤儿图、时间戳问题都要修到 0；不要改脚本或忽略输出。

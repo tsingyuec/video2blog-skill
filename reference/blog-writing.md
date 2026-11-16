@@ -214,4 +214,4 @@
 - [ ] 拆篇时文件名带 `-1` / `-2`，各篇有独立 `assets/` 与互链
 - [ ] 公式、表格、路径、转义符合第 8 节
 - [ ] 字数与视频时长/文稿信息量匹配；没有过度概括或注水
-- [ ] `check_blog`、`check_images`、`check_md_math`、`check_katex` 全部通过
+- [ ] `check_blog`、`check_images` 通过；项目若有公式或构建检查，也一并通过

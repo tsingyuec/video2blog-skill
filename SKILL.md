@@ -42,8 +42,6 @@ pip install -r requirements.txt   # opencv-python、numpy、pillow、yt-dlp
 | Python + `opencv-python` / `numpy` | 抽帧 |
 | Python + `Pillow` | 图像去重、生成文稿 |
 | `yt-dlp` | 下载 B 站 / YouTube 视频（仅视频流） |
-| Node.js | 第 7 步的博客检查脚本 |
-| KaTeX | 公式检查；默认从项目的 `vendor/katex/` 读取，也可用 `KATEX_PATH` 指定 |
 
 ## 目录约定
 
@@ -298,20 +296,14 @@ REWRITE
 
 ```bash
 # 图片引用、缺失、格式、孤儿图
-node scripts/check/check_images.mjs <博客文件或目录>
+python3 scripts/check/check_images.py <博客文件或目录>
 
 # 时间戳数量与链接一致性、标题层级、图片写法
-node scripts/check/check_blog.mjs <博客文件或目录>
-
-# 源文件公式：KaTeX 渲染失败、落单 $、残留代码样式
-node scripts/check/check_md_math.mjs <博客文件或目录>
-
-# 构建产物里的公式（项目有构建流程时，最后跑）
-node scripts/check/check_katex.mjs <构建产物目录> --recursive
+python3 scripts/check/check_blog.py <博客文件或目录>
 ```
 
-- 检查脚本从项目根目录向上查找 `vendor/katex/katex.mjs`；找不到时设 `KATEX_PATH`。
-- 脚本报出的缺失图片、格式不符、未引用图、时间戳不足或对不上、标题跳级、公式错误、落单 `$`、代码样式公式，都要在正文或配图里修掉，不能只改脚本或忽略。
+- 脚本报出的缺失图片、格式不符、未引用图、时间戳不足或对不上、标题跳级，都要在正文或配图里修掉，不能只改脚本或忽略。
+- 公式检查与构建检查属于具体项目的渲染链，不在本技能内；项目有对应命令时一并跑。
 - 项目另有构建或死链检查时一并跑；以项目命令为准。
 - 内容层面仍要逐窗口对照文稿：讲过的内容有交代，寒暄与通知可删，难讲的段落不能删；讲者没说的不编。
 
@@ -348,10 +340,8 @@ node scripts/check/check_katex.mjs <构建产物目录> --recursive
 - `scripts/pipeline/subtitle_fetch.py` — 字幕抓取（B 站 Kedou / YouTube yt-dlp）
 - `scripts/pipeline/build_transcript.py` — 图-字幕视频演说图文稿生成
 - `scripts/pipeline/transcript_windows.py` — 文稿通顺化的「按窗口导出 / 写回」工具
-- `scripts/check/check_images.mjs` — 图片引用、格式与孤儿图检查
-- `scripts/check/check_blog.mjs` — 时间戳、标题层级与图片写法检查
-- `scripts/check/check_md_math.mjs` — 源文件公式检查
-- `scripts/check/check_katex.mjs` — 构建产物公式检查
+- `scripts/check/check_images.py` — 图片引用、格式与孤儿图检查
+- `scripts/check/check_blog.py` — 时间戳、标题层级与图片写法检查
 - `scripts/check/convert_math_inline.py` — 代码样式公式的批量迁移工具（按需）
 - `reference/kedou-api.md` — 字幕接口加密原理与维护（第 4 步报错时读）
 - `reference/blog-writing.md` — 金字塔写作风格、配图、时间戳与排版规范（写博客前必读）

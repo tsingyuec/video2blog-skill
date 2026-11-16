@@ -33,7 +33,7 @@
 npx skills add tsingyuec/video2blog-skill
 ```
 
-命令会把 skill 复制到当前项目的 `.agents/skills/video2blog/`，加上 `--global` 则装到全局。它需要 Python 3.9 以上和 `requirements.txt` 里的依赖；不需要 ffmpeg，因为只下载视频流，字幕来自平台。博客检查脚本需要 Node.js 18+；公式检查还需要 KaTeX。脚本从当前目录向上查找 `vendor/katex/katex.mjs` 或 `node_modules/katex/dist/katex.mjs`，也可用 `KATEX_PATH` 指定。
+命令会把 skill 复制到当前项目的 `.agents/skills/video2blog/`，加上 `--global` 则装到全局。它需要 Python 3.9 以上和 `requirements.txt` 里的依赖；不需要 ffmpeg，因为只下载视频流，字幕来自平台。博客检查脚本是 Python 3，不需要 Node.js 或 KaTeX。
 
 装好之后，把视频链接交给 agent 即可：
 
@@ -57,7 +57,7 @@ npx skills add tsingyuec/video2blog-skill
 | ④ 字幕 | B 站走 Kedou，YouTube 走 yt-dlp | `subs/<id>.srt` |
 | ⑤ 文稿 | 按画面变化切窗口，合并窗口内字幕，加时间戳 | `transcripts/<标题>.md` |
 | ⑥ 博客 | 只依据文稿写作 | `blog/<标题>.md` |
-| ⑦ 检查 | 图片引用、时间戳、公式、构建检查 | 干净的博客与配图 |
+| ⑦ 检查 | 图片引用、时间戳、项目构建检查 | 干净的博客与配图 |
 
 给定链接从 ② 开始；只有关键词从 ① 开始。① 抓到的字幕会被 ④ 直接复用，不重复请求。
 
@@ -108,11 +108,8 @@ scripts/
     │   ├─ build_transcript.py
     │   └─ transcript_windows.py
     └─ check/              # 博客检查
-        ├─ check_images.mjs
-        ├─ check_blog.mjs
-        ├─ check_md_math.mjs
-        ├─ check_katex.mjs
-        ├─ katex.mjs
+        ├─ check_images.py
+        ├─ check_blog.py
         └─ convert_math_inline.py
 examples/
     ├─ zh-CN/              # 示例产出（中文）

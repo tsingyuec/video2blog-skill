@@ -33,7 +33,7 @@ One run on Stanford CS336 *Lecture 7, Parallel training* (61 minutes, on Bilibil
 npx skills add tsingyuec/video2blog-skill
 ```
 
-The CLI copies the skill into `.agents/skills/video2blog/` for the current project, or into your global skills directory with `--global`. It needs Python 3.9 or newer and the packages in `requirements.txt`; ffmpeg is not needed, because only the video stream is downloaded and the captions come from the platform. The blog check scripts need Node.js 18+; formula checks also need KaTeX. The scripts look upward from the current directory for `vendor/katex/katex.mjs` or `node_modules/katex/dist/katex.mjs`, or use `KATEX_PATH`.
+The CLI copies the skill into `.agents/skills/video2blog/` for the current project, or into your global skills directory with `--global`. It needs Python 3.9 or newer and the packages in `requirements.txt`; ffmpeg is not needed, because only the video stream is downloaded and the captions come from the platform. The blog checks are Python 3; they do not need Node.js or KaTeX.
 
 Once installed, hand the agent a link:
 
@@ -57,7 +57,7 @@ Find the videos worth watching on this topic: KV cache quantization
 | ④ captions | Kedou on Bilibili, yt-dlp on YouTube | `subs/<id>.srt` |
 | ⑤ transcript | windows cut on picture changes, captions merged, timestamps added | `transcripts/<title>.md` |
 | ⑥ blog | written from the transcript only | `blog/<title>.md` |
-| ⑦ check | image references, timestamps, formulas, build | a clean post and its assets |
+| ⑦ check | image references, timestamps, project build | a clean post and its assets |
 
 Start at ② when you already have a link; start at ① when you only have a keyword. Captions fetched for ① are reused by ④, not requested twice.
 
@@ -108,11 +108,8 @@ scripts/
     │   ├─ build_transcript.py
     │   └─ transcript_windows.py
     └─ check/              # blog checks
-        ├─ check_images.mjs
-        ├─ check_blog.mjs
-        ├─ check_md_math.mjs
-        ├─ check_katex.mjs
-        ├─ katex.mjs
+        ├─ check_images.py
+        ├─ check_blog.py
         └─ convert_math_inline.py
 examples/
     ├─ zh-CN/              # example output, Chinese
