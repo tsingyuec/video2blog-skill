@@ -9,6 +9,8 @@ English | [简体中文](./README.zh-CN.md)
 
 A long video keeps its information concentrated on a few dozen slides, each of which flips past in a moment; to find a particular point afterwards, you have to watch from the start. video2blog reorganises the material: it cuts the video where the picture changes, and gives each segment one representative frame, the captions spoken over it and a timestamp link back to the video, which together form the video transcript. The post is written from that transcript alone and consults no other material, so every sentence rests on the video's original captions. A slide that lingers still yields a single frame, and an hour-long lecture ends up at about two hundred lines. Reading the finished post is enough to grasp the video as a whole, and for the parts that matter, the timestamp jumps to the corresponding point in the playback.
 
+It can also start from a keyword: the skill searches for candidates, ranks them by their captions, and shortlists one to three videos worth writing about, each becoming its own post. Captions fetched for that ranking are reused by the download-and-write steps.
+
 [Example](#example) • [Install](#install) • [How it works](#how-it-works) • [Output](#output) • [Limitations](#limitations) • [Repo structure](#repo-structure)
 
 ## Example
@@ -31,7 +33,7 @@ One run on Stanford CS336 *Lecture 7, Parallel training* (61 minutes, on Bilibil
 npx skills add tsingyuec/video2blog-skill
 ```
 
-The CLI copies the skill into `.agents/skills/video2blog/` for the current project, or into your global skills directory with `--global`. It needs Python 3.9 or newer and the packages in `requirements.txt`; ffmpeg is not needed, because only the video stream is downloaded and the captions come from the platform.
+The CLI copies the skill into `.agents/skills/video2blog/` for the current project, or into your global skills directory with `--global`. It needs Python 3.9 or newer and the packages in `requirements.txt`; ffmpeg is not needed, because only the video stream is downloaded and the captions come from the platform. The blog check scripts need Node.js 18+; formula checks also need KaTeX. The scripts look upward from the current directory for `vendor/katex/katex.mjs` or `node_modules/katex/dist/katex.mjs`, or use `KATEX_PATH`.
 
 Once installed, hand the agent a link:
 
@@ -39,19 +41,31 @@ Once installed, hand the agent a link:
 Turn this video into a blog post: https://www.bilibili.com/video/BV11LEA6eEuj/?p=7
 ```
 
+Or just give it a keyword:
+
+```
+Find the videos worth watching on this topic: KV cache quantization
+```
+
 ## How it works
 
 | Step | What happens | Output |
 | --- | --- | --- |
-| ① download | yt-dlp fetches the video stream, audio excluded | `videos/<id>.mp4` |
-| ② frames | one frame per second, kept at full size | `frames/<id>/00012.webp` |
-| ③ captions | Kedou on Bilibili, yt-dlp on YouTube | `subs/<id>.srt` |
-| ④ transcript | windows cut on picture changes, captions merged, timestamps added | `transcripts/<title>.md` |
-| ⑤ blog | written from the transcript only | `blog/<title>.md` |
+| ① find | given a keyword, search both platforms and rank candidates by their captions | shortlist; captions cached for reuse |
+| ② download | yt-dlp fetches the video stream, audio excluded | `videos/<id>.mp4` |
+| ③ frames | one frame per second, kept at full size | `frames/<id>/00012.webp` |
+| ④ captions | Kedou on Bilibili, yt-dlp on YouTube | `subs/<id>.srt` |
+| ⑤ transcript | windows cut on picture changes, captions merged, timestamps added | `transcripts/<title>.md` |
+| ⑥ blog | written from the transcript only | `blog/<title>.md` |
+| ⑦ check | image references, timestamps, formulas, build | a clean post and its assets |
+
+Start at ② when you already have a link; start at ① when you only have a keyword. Captions fetched for ① are reused by ④, not requested twice.
+
+Each post carries at least 10 timestamps, increasing with the video's length. A video close to 60 minutes may be split into two posts when its content has two independent centres; the file names take `-1` / `-2` suffixes.
 
 A window is a stretch of the video in which the picture does not change: one slide, however long it stays up, is one window. Each window becomes one row of the transcript, with one representative frame.
 
-Step ② extracts one frame per second, so a slide that stays up for 30 seconds produces 30 near-identical frames. Step ④ has `scripts/build_transcript.py` reduce each frame to 32×18 grayscale and compare it with the current window's representative frame: a new window opens when the mean difference exceeds 12 and the current picture has been on screen for at least 5 seconds, while a single picture is cut off at 25 seconds. On lecture videos that drops about 95% of the frames without losing a slide. The three numbers are defaults, adjustable with `--diff`, `--minwin` and `--maxwin`.
+Step ③ extracts one frame per second, so a slide that stays up for 30 seconds produces 30 near-identical frames. Step ⑤ has `scripts/pipeline/build_transcript.py` reduce each frame to 32×18 grayscale and compare it with the current window's representative frame: a new window opens when the mean difference exceeds 12 and the current picture has been on screen for at least 5 seconds, while a single picture is cut off at 25 seconds. On lecture videos that drops about 95% of the frames without losing a slide. The three numbers are defaults, adjustable with `--diff`, `--minwin` and `--maxwin`.
 
 The transcript is dumped window by window, rewritten for readability, and written back. The rewrite only smooths sentences; it may not add or remove information. The blog is written from the corrected transcript, not from the raw captions.
 
@@ -83,14 +97,23 @@ Frame extraction is CPU-bound, so an hour of video takes minutes rather than sec
 SKILL.md                   # the workflow the agent follows
 requirements.txt
 reference/
-    ├─ blog-writing.md     # writing style: pyramid structure, SCQA, glossary
+    ├─ blog-writing.md     # writing style, images, timestamps, layout
     └─ kedou-api.md        # Kedou caption API: encryption and troubleshooting
 scripts/
-    ├─ download_video.py   # yt-dlp wrapper, video stream only, resumable
-    ├─ extract_frames.py   # OpenCV frame extraction
-    ├─ subtitle_fetch.py   # captions: Kedou on Bilibili, yt-dlp on YouTube
-    ├─ build_transcript.py # windows, de-duplication, merged captions, timestamps
-    └─ transcript_windows.py # dump and apply windows when rewriting
+    ├─ README.md           # script entry points
+    ├─ pipeline/           # download, frames, captions, transcript, rewrite
+    │   ├─ download_video.py
+    │   ├─ extract_frames.py
+    │   ├─ subtitle_fetch.py
+    │   ├─ build_transcript.py
+    │   └─ transcript_windows.py
+    └─ check/              # blog checks
+        ├─ check_images.mjs
+        ├─ check_blog.mjs
+        ├─ check_md_math.mjs
+        ├─ check_katex.mjs
+        ├─ katex.mjs
+        └─ convert_math_inline.py
 examples/
     ├─ zh-CN/              # example output, Chinese
     │   ├─ blog.md
