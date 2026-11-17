@@ -7,6 +7,8 @@
     （此时文件可能大很多，可用 --height 降低）。
   - yt-dlp 默认支持断点续传（.part 文件）；注意**换格式后旧 .part 会失效**
     （HTTP 416），需删除 *.part 后重下。
+  - ``--cookies`` 传 Netscape 格式的 cookies.txt（浏览器复制的 ``SESSDATA=xxx``
+    字符串先自行转成该文件）；B 站高分辨率、YouTube 限流或需登录的站点都可能要求。
 
 目录约定：每个视频一个以 ``--bv``（视频 ID）命名的子目录，多个视频天然共存：
     <workdir>/videos/<视频ID>.mp4
@@ -14,6 +16,7 @@
 用法:
     python download_video.py --workdir <dir> --bv BV1xxxx [--height 1080]
     python download_video.py --platform youtube --bv dQw4w9WgXcQ --workdir <dir>
+    python download_video.py --workdir <dir> --bv BV1xxxx --cookies cookies.txt
 """
 from __future__ import annotations
 
@@ -38,15 +41,22 @@ PLATFORM_URLS = {
 }
 
 
-def build_download_cmd(platform: str, video_id: str, workdir: str, height: int) -> list[str]:
-    """构造 yt-dlp 下载命令；输出为 <workdir>/videos/<视频ID>.mp4。"""
+def build_download_cmd(platform: str, video_id: str, workdir: str, height: int,
+                       cookies: str = "") -> list[str]:
+    """构造 yt-dlp 下载命令；输出为 <workdir>/videos/<视频ID>.mp4。
+
+    ``cookies`` 为 Netscape 格式 cookies.txt 的路径，非空时交给 yt-dlp 的 --cookies。
+    """
     url = PLATFORM_URLS[platform].format(video_id=video_id)
     # 优先该高度内的 avc1（H.264，OpenCV 兼容性最好）；没有则回退任意编码
     video_format = f"bv*[height<={height}][vcodec^=avc1]/bv*[height<={height}]"
+    cookie_options = (["--cookies", os.path.abspath(os.path.expanduser(cookies))]
+                      if cookies else [])
     return [
         sys.executable, "-m", "yt_dlp", "--no-warnings", "--newline", "--progress",
         "-f", video_format,
         "-o", os.path.join(workdir, "videos", f"{video_id}.%(ext)s"),
+        *cookie_options,
         url,
     ]
 
@@ -61,6 +71,8 @@ def parse_args() -> argparse.Namespace:
                         help="视频平台，默认 bilibili")
     parser.add_argument("--height", type=int, default=1080,
                         help="最大分辨率高度，默认 1080；体积过大可降到 720")
+    parser.add_argument("--cookies", default="",
+                        help="Netscape 格式 cookies.txt 的路径；需要登录态或被限流时使用")
     return parser.parse_args()
 
 
@@ -74,7 +86,11 @@ def find_output(workdir: str, video_id: str) -> str | None:
 def main() -> None:
     _force_utf8_stdio()
     args = parse_args()
-    cmd = build_download_cmd(args.platform, args.bv, args.workdir, args.height)
+    if args.cookies and not os.path.isfile(os.path.expanduser(args.cookies)):
+        print(f"--cookies 文件不存在: {args.cookies}")
+        raise SystemExit(2)
+    cmd = build_download_cmd(args.platform, args.bv, args.workdir, args.height,
+                             args.cookies)
     print(">", " ".join(cmd))
     return_code = subprocess.call(cmd)
     if return_code == 0:

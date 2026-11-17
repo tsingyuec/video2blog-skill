@@ -8,7 +8,7 @@
 | --- | --- |
 | `download_video.py` | yt-dlp 封装，仅下载视频流，支持断点续传 |
 | `extract_frames.py` | 1fps 抽帧（OpenCV），文件名即秒数 |
-| `subtitle_fetch.py` | 字幕：B 站走 Kedou，YouTube 走 yt-dlp |
+| `subtitle_fetch.py` | 字幕：B 站走 Kedou，YouTube 走 yt-dlp（支持 `--cookies`） |
 | `build_transcript.py` | 按画面变化切窗口、去重、合并窗口字幕、加时间戳 |
 | `transcript_windows.py` | 文稿通顺化的「按窗口导出 / 写回」工具 |
 

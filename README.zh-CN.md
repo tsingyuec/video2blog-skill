@@ -109,8 +109,7 @@ scripts/
     │   └─ transcript_windows.py
     └─ check/              # 博客检查
         ├─ check_images.py
-        ├─ check_blog.py
-        └─ convert_math_inline.py
+        └─ check_blog.py
 examples/
     ├─ zh-CN/              # 示例产出（中文）
     │   ├─ blog.md

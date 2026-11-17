@@ -14,7 +14,7 @@ description: "video2blog skill 将视频素材转化为文字：按画面变化�
 | 从零整理一个视频 | 按第 1→5 步顺序完整走完 |
 | 已下好视频/已有抽帧 | 跳到第 3 步取字幕 |
 | 已有视频演说图文稿，只要写博客 | 直接第 4 步通顺化 + 第 5 步 |
-| 字幕接口报错/限流 | 读 `reference/kedou-api.md` |
+| 字幕接口报错/限流 | 见「注意事项」+ `reference/kedou-api.md` |
 | 需要写作规范细节 | 读 `reference/blog-writing.md` |
 | 抽帧/去重效果不好 | 见「参数调优速查」 |
 
@@ -65,6 +65,9 @@ python scripts/pipeline/download_video.py --workdir "<workdir>" --bv <BV>
 
 # YouTube（单视频；分辨率过高/体积过大时用 --height 720）
 python scripts/pipeline/download_video.py --workdir "<workdir>" --platform youtube --bv <视频ID> --height 720
+
+# 需要登录态 / 被限流时带 cookie（Netscape cookies.txt）
+python scripts/pipeline/download_video.py --workdir "<workdir>" --bv <BV> --cookies cookies.txt
 ```
 
 要点：
@@ -95,9 +98,10 @@ python scripts/pipeline/subtitle_fetch.py --platform youtube --bv <视频ID> --w
 ```
 
 - **语言**：默认 `zh-Hans`（简体中文），用 `--lang` 指定（`zh-CN`/`zh-TW`/`en`/`ja` 等会自动归一）。B 站据此在多轨道里选一条；YouTube 据此请求对应语言（含自动翻译）。`--lang ""` 则由平台默认。
+- `--cookies` 用法同第 1 步，YouTube 字幕端点限流（429）时带上通常可绕过。
 - **YouTube 回退链**：先 yt-dlp → 失败（多因 YouTube 对字幕端点限流 429）则走 kedou → 仍失败才报错退出。
 - B 站额外保留 `subs/kedou_<视频ID>.json` 原始响应备查；kedou 对 body 做了 RSA+AES 加密，脚本已实现（纯 Python 标准库）。
-- **限流**：B 站 kedou 连续请求约 10 次后返回 `code:500 请求过于频繁`，被限后等 1–2 分钟再续。YouTube 侧 429 换 IP/加 cookie 可缓解。
+- **限流**：B 站 kedou 连续请求约 10 次后 `code:500 请求过于频繁`，YouTube 侧 429 常见。
 - 若 kedou 改版/失效（报加密错误、空字幕等），读 `reference/kedou-api.md` 了解加密原理与排查。
 
 ## 第 4 步：生成「图-字幕」视频演说图文稿（去重 + 合并 + 时间戳）
@@ -162,19 +166,21 @@ REWRITE
 | --- | --- |
 | 保留帧太多、内容重复 | 调大 `--diff`（如 14–16）、调大 `--minwin` |
 | 保留帧太少、漏掉幻灯片 | 调小 `--diff`（如 8–10）、调大 `--maxwin` |
-| 字幕请求被限流 | 分批下载，间隔 1–2 分钟重试 |
+| 字幕请求被限流 | 间隔 1–2 分钟重试，或停下由用户提供 cookie（推荐）或改本地 STT |
 | 抽帧太慢 | 降低 `--width`（如 640）或增大抽帧间隔（`--fps 0.5`） |
 | 子任务中断 | 分段读写、多次追加；或按讲次拆分并行 |
 
 ## 注意事项
 
+- **限流先停下，别硬重试**：YouTube 429 / kedou `code:500` 时暂停任务，把报错告诉用户，给两条路：①**获取 cookie（推荐）**——建议用户提供 `cookies`，用 `--cookies` 重跑第 3 步；②**本地 STT**——`python -m yt_dlp -f ba/b -x --audio-format wav -o "videos/<视频ID>.%(ext)s" <视频URL>` 下音频，whisper/faster-whisper 等转写后写成 `subs/<视频ID>.srt`，继续第 4 步。
 - **字幕修正**：B 站 AI 字幕 / YouTube 自动字幕，可能出现识别错误（`CS336`→`cs three three nox`、人名/术语错拼）。写博客时必须纠正，且不得编造字幕之外的事实。
 - **1fps 不等于每帧都要用**：文稿/博客只保留代表帧，否则又大又冗余。
 
 ## 配套文件
 
+- `scripts/pipeline/download_video.py` — 视频流下载（yt-dlp 封装，支持 `--cookies`）
 - `scripts/pipeline/extract_frames.py` — 1fps 抽帧（OpenCV）
-- `scripts/pipeline/subtitle_fetch.py` — Kedou 字幕抓取
+- `scripts/pipeline/subtitle_fetch.py` — Kedou / yt-dlp 字幕抓取（支持 `--cookies`）
 - `scripts/pipeline/build_transcript.py` — 图-字幕视频演说图文稿生成
 - `scripts/pipeline/transcript_windows.py` — 文稿通顺化的"按窗口导出（dump）/写回（apply）"工具
 - `scripts/check/check_images.py` - 校验 Markdown 里的图片引用

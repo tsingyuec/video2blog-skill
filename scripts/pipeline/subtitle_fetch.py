@@ -15,11 +15,15 @@
 输出：``<workdir>/subs/<视频ID>.srt``（统一给下游用）；Bilibili 额外保留
 ``<workdir>/subs/kedou_<视频ID>.json`` 原始响应备查。
 
+``--cookies`` 传 Netscape 格式的 cookies.txt：YouTube 字幕端点限流（HTTP 429）
+时带上登录态 cookie 通常可绕过。
+
 目录约定：每个视频一个以 ``--bv``（视频 ID）命名的子目录，多个视频天然共存。
 
 用法:
     python subtitle_fetch.py --workdir <dir> --bv BV1xxxx
     python subtitle_fetch.py --platform youtube --bv dQw4w9WgXcQ --workdir <dir>
+    python subtitle_fetch.py --platform youtube --bv dQw4w9WgXcQ --workdir <dir> --cookies cookies.txt
 """
 from __future__ import annotations
 
@@ -319,13 +323,15 @@ def fetch_subtitle(video_url: str) -> dict:
     return request_json(EXTRACT_ENDPOINT, body)
 
 
-def resolve_subtitle_content(response: dict, target_lang: str = DEFAULT_TARGET_LANG) -> str:
+def resolve_subtitle_content(response: dict,
+                             target_lang: str = DEFAULT_TARGET_LANG) -> str:
     """从响应中取出 SRT 文本；kedou 对部分平台只回字幕源地址而不内联文本。
 
     多轨道时按 ``target_lang``（默认中文）挑选对应语言的轨道。YouTube 等平台的
     响应里 ``content`` 可能为 null，同时给一个 ``srcUrl``（指向平台官方字幕，
     内容即标准 SRT）：此时下载 srcUrl 并回填 content，下载前给地址注入 ``tlang``
     让平台按目标语言翻译，保证下游 build_transcript.py 拿到统一格式。
+
     """
     items = (response.get("data") or {}).get("subtitleItemVoList") or []
     if not items:
@@ -364,13 +370,15 @@ def write_srt(workdir: str, video_id: str, srt_text: str) -> str:
     return srt_path
 
 
-def fetch_youtube_subtitle(workdir: str, video_id: str, lang: str) -> str:
+def fetch_youtube_subtitle(workdir: str, video_id: str, lang: str,
+                           cookies: str = "") -> str:
     """用 yt-dlp 拉 YouTube 官方字幕（自动字幕 + 自动翻译），产出 subs/<视频ID>.srt。
 
     与 kedou 同源（都是 YouTube timedtext），但无 kedou 的请求次数上限。
     ``lang`` 会归一为 YouTube 语言代码（如 zh-CN -> zh-Hans）后作为 yt-dlp 的
     ``--sub-langs``；为空则不指定，交由 yt-dlp 使用默认语言。注意 YouTube 侧
-    仍可能对字幕端点限流（HTTP 429，自动翻译轨尤其明显）。
+    仍可能对字幕端点限流（HTTP 429，自动翻译轨尤其明显）；``cookies`` 为
+    cookies.txt 路径，带上登录态 cookie 通常能绕过。
     """
     subs_dir = os.path.join(workdir, "subs")
     os.makedirs(subs_dir, exist_ok=True)
@@ -383,6 +391,8 @@ def fetch_youtube_subtitle(workdir: str, video_id: str, lang: str) -> str:
     ]
     if sub_lang:
         cmd += ["--sub-langs", sub_lang]
+    if cookies:
+        cmd += ["--cookies", os.path.abspath(os.path.expanduser(cookies))]
     cmd.append(build_video_url("youtube", video_id))
     print(">", " ".join(cmd))
     if subprocess.call(cmd) != 0:
@@ -431,16 +441,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lang", default=DEFAULT_TARGET_LANG,
                         help="字幕目标语言（默认 zh-Hans 简体中文；B 站按此选轨道，"
                              "YouTube 按此请求翻译字幕；传空字符串则由平台默认）")
+    parser.add_argument("--cookies", default="",
+                        help="Netscape 格式 cookies.txt 的路径；"
+                             "YouTube 字幕端点限流 429 时带上通常可绕过")
     return parser.parse_args()
 
 
 def main() -> None:
     _force_utf8_stdio()
     args = parse_args()
+    if args.cookies and not os.path.isfile(os.path.expanduser(args.cookies)):
+        print(f"--cookies 文件不存在: {args.cookies}")
+        raise SystemExit(2)
     try:
         if args.platform == "youtube":
             try:
-                srt_path = fetch_youtube_subtitle(args.workdir, args.bv, args.lang)
+                srt_path = fetch_youtube_subtitle(args.workdir, args.bv, args.lang,
+                                                 args.cookies)
             except Exception as exc:
                 print(f"{args.bv}: yt-dlp 抓取失败（{exc}），改用 kedou 重试…")
                 srt_path = fetch_kedou_subtitle(args.workdir, "youtube", args.bv, args.lang)

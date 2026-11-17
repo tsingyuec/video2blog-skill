@@ -73,6 +73,7 @@ YouTube 官方 timedtext 字幕（内容即标准 SRT）。`subtitle_fetch.py` �
 
 - 连续请求约 **10 次**后会返回 `code: 500, message: 请求过于频繁，请稍后再试`（连同 `code:530` 之外的普通错误）。
 - 处理：**分批请求 + 每次间隔数秒**；被限流后**等待约 1–2 分钟**再继续，通常即可恢复。
+- 仍不行就**停下**，按 `SKILL.md`「注意事项：限流先停下，别硬重试」处理：让用户提供 cookie（推荐）或改用本地 STT 转写。
 - 脚本 `subtitle_fetch.py` 逐条容错：单个视频失败不影响后续（多视频场景重复调用即可）。
 
 ## 排查清单
@@ -80,7 +81,7 @@ YouTube 官方 timedtext 字幕（内容即标准 SRT）。`subtitle_fetch.py` �
 | 症状 | 可能原因 | 处理 |
 | --- | --- | --- |
 | `code:530 数据处理异常` | body 未加密 / 加密方式改变 | 核对本文件第 2–4 步；确认使用同一套 RSA+AES |
-| `code:500 请求过于频繁` | 触发限流 | 等待 1–2 分钟后分批重试 |
+| `code:500 请求过于频繁` | 触发限流 | 先停下：要用户 cookie（`--cookies`，推荐）或本地 STT 转写；短期可等 1–2 分钟分批重试 |
 | `code:200` 但 `subtitleItemVoList` 为空 | 该视频没有 AI 字幕（或解析失败） | 跳过，或改用 yt-dlp 直接拉字幕 / 本地 Whisper 转写 |
 | `code:200`、`content` 为 `null` | 走 kedou 拉 YouTube 时：字幕在 `srcUrl` | 正常现象，脚本会下载回填（YouTube 现默认改走 yt-dlp） |
 | `auth/keys` 报错 | 站点改版 | 重新从前端 JS 提取加密逻辑（搜索 `useReqPublicKey` / `encryptLong`） |
